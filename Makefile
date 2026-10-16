@@ -65,6 +65,7 @@ create_environment:
 .PHONY: data
 data: requirements
 	$(PYTHON_INTERPRETER) -m mibici_mlops.dataset
+	$(PYTHON_INTERPRETER) -m mibici_mlops.manifest
 
 #################################################################################
 # Self Documenting Commands                                                     #
