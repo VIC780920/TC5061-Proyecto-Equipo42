@@ -5,6 +5,7 @@ matplotlib
 notebook
 numpy
 pandas
+pyarrow
 pip
 pytest
 python-dotenv
