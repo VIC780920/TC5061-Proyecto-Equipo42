@@ -1,0 +1,77 @@
+digraph arquitectura {
+    graph [rankdir=LR, fontname="Helvetica", fontsize=12, nodesep=0.35, ranksep=0.55, pad=0.3,
+           label="Arquitectura del sistema MiBici — Equipo 42 (Etapa 1; en gris punteado, etapas siguientes)", labelloc=t, fontsize=15];
+    node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, fillcolor="#FFFFFF", color="#5B6770", margin="0.15,0.08"];
+    edge  [fontname="Helvetica", fontsize=9, color="#5B6770"];
+
+    subgraph cluster_fuentes {
+        label="Fuentes de datos"; style="rounded,filled"; fillcolor="#EAF2FB"; color="#9DB7D5";
+        csv  [label="Portal de datos abiertos MiBici\nviajes mensuales CSV\njul-2025 → sep-2026 (15 meses)"];
+        nom  [label="Nomenclatura de estaciones CSV\n(id, ubicación, capacidad)"];
+    }
+
+    subgraph cluster_ingesta {
+        label="Ingesta y versionado"; style="rounded,filled"; fillcolor="#EAF7EE"; color="#9CCBA9";
+        dataset [label="dataset.py\nrequests + pandas\ndescarga, codificación, fechas,\nduplicados, sin datos personales"];
+        manif   [label="data_manifest.json (en Git)\nregistros + SHA-256 por archivo\n→ data_version"];
+    }
+
+    subgraph cluster_alm {
+        label="Almacenamiento local (fuera de Git)"; style="rounded,filled"; fillcolor="#FDF3E3"; color="#E2C08D";
+        raw  [label="data/raw/\nCSV originales"];
+        proc [label="data/processed/\nParquet (viajes, estaciones)"];
+    }
+
+    subgraph cluster_proc {
+        label="Procesamiento"; style="rounded,filled"; fillcolor="#F1ECF8"; color="#B8A6D6";
+        feat [label="features.py\ntabla estación × hora,\ncalendario, rezagos, capacidad,\npartición temporal 9 / 3 / 3"];
+    }
+
+    subgraph cluster_ent {
+        label="Entrenamiento y evaluación"; style="rounded,filled"; fillcolor="#FBEAEA"; color="#DDA3A3";
+        runexp [label="run_experiments\n(un comando)"];
+        p1 [label="P1 · regresión\nmodeling/p1.py"];
+        p2 [label="P2 · clasificación\nmodeling/p2.py"];
+        p3 [label="P3 · clustering\nmodeling/p3.py"];
+        {rank=same; p1; p2; p3;}
+    }
+
+    subgraph cluster_reg {
+        label="Registro de experimentos"; style="rounded,filled"; fillcolor="#E6F4F4"; color="#8EC5C5";
+        track [label="tracking.py · registrar_run\ntags: equipo, pregunta, git_commit\nparams: fechas, data_version, seed"];
+        mlflow [label="MLflow Tracking\nexperimento mibici-equipo42\nmlflow.db + artefactos"];
+    }
+
+    subgraph cluster_base {
+        label="Base del proyecto"; style="rounded,filled"; fillcolor="#F2F2F2"; color="#BBBBBB";
+        repo [label="GitHub · GitHub Flow\nrama main protegida + Pull Requests\nestructura Cookiecutter Data Science"];
+        cfg  [label="config.py (configuración en un solo lugar)\nrutas, fechas, semilla, URLs, MLflow\nlo usan dataset, features y tracking"];
+    }
+
+    subgraph cluster_fut {
+        label="Etapas siguientes"; style="rounded,dashed"; color="#AAAAAA"; fontcolor="#888888";
+        node [color="#AAAAAA", fontcolor="#888888", style="rounded,dashed"];
+        registry [label="MLflow Model Registry"];
+        api      [label="FastAPI + Docker"];
+        monitor  [label="Evidently (drift)\n+ reentrenamiento"];
+        cicd     [label="CI/CD + PyTest"];
+    }
+
+    csv -> dataset;
+    nom -> dataset;
+    dataset -> raw;
+    dataset -> proc;
+    dataset -> manif [label="genera"];
+    proc -> feat;
+    feat -> p1; feat -> p2; feat -> p3;
+    runexp -> p1; runexp -> p2; runexp -> p3;
+    p1 -> track; p2 -> track; p3 -> track;
+    manif -> track [label="hash", style=dashed];
+    track -> mlflow;
+    repo -> cfg [style=invis];
+
+    mlflow -> registry [style=dashed, color="#AAAAAA"];
+    registry -> api    [style=dashed, color="#AAAAAA"];
+    api -> monitor     [style=dashed, color="#AAAAAA"];
+    repo -> cicd       [style=dashed, color="#AAAAAA"];
+}
