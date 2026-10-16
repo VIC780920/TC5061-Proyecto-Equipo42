@@ -3,11 +3,10 @@
 
 import subprocess
 
-import pandas as pd
 from loguru import logger
+import pandas as pd
 
 from mibici_mlops.config import MESES_URLS, RAW_DATA_DIR, VIAJES_PATH
-
 
 COLUMNAS = {
     "Viaje_Id": "viaje_id",
@@ -77,12 +76,13 @@ def procesar_mes(mes: str) -> None:
 
 def procesar_estaciones():
     import subprocess
+
     import pandas as pd
 
     from mibici_mlops.config import (
+        ESTACIONES_PATH,
         NOMENCLATURA_URL,
         RAW_DATA_DIR,
-        ESTACIONES_PATH,
     )
 
     archivo_csv = RAW_DATA_DIR / "nomenclatura_2026_09.csv"
@@ -127,6 +127,14 @@ def procesar_estaciones():
         f"archivo: {ESTACIONES_PATH}"
     )
 
-if __name__ == "__main__":
+
+def main():
+    """Ejecuta la ingesta completa de MiBici."""
     for mes in MESES_URLS:
         procesar_mes(mes)
+
+    procesar_estaciones()
+
+
+if __name__ == "__main__":
+    main()
