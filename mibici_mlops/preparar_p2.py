@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from mibici_mlops.config import PROJ_ROOT
+from mibici_mlops.config import PROJ_ROOT, VAL_INICIO, TEST_INICIO
 from mibici_mlops.features import (
     agregar_calendario,
     agregar_capacidad,
@@ -129,11 +129,41 @@ def generar_dataset_p2() -> pd.DataFrame:
         rezagos=(1, 2, 24, 168),
     )
 
+    tabla = agregar_rezagos(
+        tabla,
+        columna="llegadas",
+        rezagos=(1, 2, 24, 168),
+    )
+
+    tabla = agregar_rezagos(
+        tabla,
+        columna="flujo_neto",
+        rezagos=(1, 2, 24, 168),
+    )
+
     print("Calculando promedios históricos...")
     tabla = agregar_promedios(
         tabla,
         columna="salidas",
     )
+
+    tabla = agregar_promedios(
+        tabla,
+        columna="llegadas",
+    )
+
+    tabla = agregar_promedios(
+        tabla,
+        columna="flujo_neto",
+    )
+
+    # Flujo neto acumulado de las tres horas anteriores,
+    # relativo a la capacidad de la estación.
+    tabla["flujo_neto_3h_rel"] = (
+        tabla["flujo_neto_lag_1"]
+        + tabla["flujo_neto_lag_2"]
+        + tabla.groupby("estacion_id")["flujo_neto"].shift(3)
+    ) / tabla["capacidad"].replace(0, float("nan"))
 
     print("Generando etiquetas P2...")
     tabla = crear_etiqueta_p2(
@@ -141,14 +171,14 @@ def generar_dataset_p2() -> pd.DataFrame:
         umbral=0.30,
     )
 
-    # Riesgo de desabasto o saturación tres horas después
-    tabla["riesgo_p2_t_3h"] = tabla.groupby("estacion_id")["riesgo_p2"].shift(-3)
+    # Riesgo de desabasto o saturación en la siguiente hora
+    tabla["riesgo_p2_t_1h"] = tabla.groupby("estacion_id")["riesgo_p2"].shift(-1)
 
-    print("Calculando baseline estacional P2 (165 horas)...")
+    print("Calculando baseline estacional P2 (167 horas)...")
     tabla = agregar_rezagos(
         tabla,
         columna="riesgo_p2",
-        rezagos=(165,),
+        rezagos=(167,),
     )
 
     print("Asignando particiones temporales...")
@@ -156,5 +186,61 @@ def generar_dataset_p2() -> pd.DataFrame:
         tabla,
         columna="hora",
     )
+    # Evitar que las etiquetas t+1 crucen los límites temporales.
+    for fecha_corte in [VAL_INICIO, TEST_INICIO]:
+        ultima_hora = pd.Timestamp(fecha_corte) - pd.Timedelta(hours=1)
+        tabla.loc[
+            tabla["hora"] == ultima_hora,
+            "riesgo_p2_t_1h",
+        ] = float("nan")
+    tabla = agregar_tasas_historicas_p2(tabla)
+    return tabla
+
+def agregar_tasas_historicas_p2(tabla: pd.DataFrame) -> pd.DataFrame:
+    """Calcula tasas históricas sin utilizar etiquetas futuras."""
+    tabla = tabla.copy()
+    tabla = tabla.sort_values(["hora", "estacion_id"])
+
+    claves = ["estacion_id", "hora_dia"]
+    es_train = tabla["conjunto"].eq("train")
+    train = tabla.loc[es_train].copy()
+
+    # Para predecir t+1, la etiqueta de una fila anterior
+    # solo es utilizable cuando ya se observó su resultado.
+    for clase, nombre in [
+        (1, "tasa_desabasto_hist"),
+        (2, "tasa_saturacion_hist"),
+    ]:
+        indicador = train["riesgo_p2_t_1h"].map(lambda x: float(x == clase) if pd.notna(x) else float("nan"))
+        acumulado = indicador.fillna(0).groupby(
+            [train[c] for c in claves]
+        ).cumsum()
+
+        # Desplazamiento adicional para excluir la etiqueta
+        # de la fila anterior, que corresponde a la hora actual.
+        suma_previa = acumulado.groupby(
+            [train[c] for c in claves]
+        ).shift(1).fillna(0)
+        conteo_previo = indicador.notna().astype(int).groupby([train[c] for c in claves]).cumsum().groupby([train[c] for c in claves]).shift(1).fillna(0)
+        train[nombre] = (
+            suma_previa / conteo_previo.replace(0, float("nan"))
+        ).fillna(0)
+
+        tasas = (
+            train.assign(indicador=indicador)
+            .groupby(claves)["indicador"]
+            .mean()
+            .rename(nombre)
+        )
+
+        tabla[nombre] = 0.0
+        tabla.loc[train.index, nombre] = train[nombre]
+        fuera_train = ~es_train
+        tabla.loc[fuera_train, nombre] = (
+            tabla.loc[fuera_train, claves]
+            .merge(tasas.reset_index(), on=claves, how="left")[nombre]
+            .fillna(0)
+            .to_numpy()
+        )
 
     return tabla

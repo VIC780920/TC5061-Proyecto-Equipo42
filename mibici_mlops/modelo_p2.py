@@ -20,10 +20,24 @@ VARIABLES_P2 = [
     "salidas_lag_168",
     "salidas_media_24h",
     "salidas_media_4sem",
+    "llegadas_lag_1",
+    "llegadas_lag_2",
+    "llegadas_lag_24",
+    "llegadas_lag_168",
+    "flujo_neto_lag_1",
+    "flujo_neto_lag_2",
+    "flujo_neto_lag_24",
+    "flujo_neto_lag_168",
+    "llegadas_media_24h",
+    "llegadas_media_4sem",
+    "flujo_neto_media_24h",
+    "flujo_neto_media_4sem",
+    "flujo_neto_3h_rel",
+    "tasa_desabasto_hist",
+    "tasa_saturacion_hist",
 ]
 
-OBJETIVO_P2 = "riesgo_p2_t_3h"
-
+OBJETIVO_P2 = "riesgo_p2_t_1h"
 
 def preparar_datos_modelo(tabla: pd.DataFrame):
     """Prepara entrenamiento, validación y prueba para P2."""

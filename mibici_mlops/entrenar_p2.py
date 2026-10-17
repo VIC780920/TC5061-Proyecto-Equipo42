@@ -150,7 +150,7 @@ def main():
     print("Evaluando baseline estacional P2...", flush=True)
 
     tabla_baseline = tabla.dropna(
-        subset=VARIABLES_P2 + ["riesgo_p2_t_3h", "riesgo_p2_lag_165"]
+        subset=VARIABLES_P2 + ["riesgo_p2_t_1h", "riesgo_p2_lag_167"]
     ).copy()
 
     metricas_baseline = {}
@@ -160,8 +160,8 @@ def main():
 
         metricas_baseline.update(
             evaluar_predicciones(
-                datos["riesgo_p2_t_3h"].astype(int),
-                datos["riesgo_p2_lag_165"].astype(int),
+                datos["riesgo_p2_t_1h"].astype(int),
+                datos["riesgo_p2_lag_167"].astype(int),
                 conjunto,
             )
         )
@@ -173,8 +173,8 @@ def main():
         run_name="p2-baseline-semana-anterior",
         params={
             "modelo": "naive_estacional",
-            "rezago_horas": 165,
-            "objetivo": "riesgo_p2_t_3h",
+            "rezago_horas": 167,
+            "objetivo": "riesgo_p2_t_1h",
             "granularidad": "estacion-hora",
             "n_filas_val": int((tabla_baseline["conjunto"] == "val").sum()),
             "n_filas_test": int((tabla_baseline["conjunto"] == "test").sum()),
@@ -211,7 +211,7 @@ def main():
         run_name="p2-random-forest",
         params={
             "modelo": "RandomForestClassifier",
-            "objetivo": "riesgo_p2_t_3h",
+            "objetivo": "riesgo_p2_t_1h",
             "n_estimators": 50,
             "max_depth": 12,
             "min_samples_leaf": 20,
