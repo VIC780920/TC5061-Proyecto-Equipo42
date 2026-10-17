@@ -27,8 +27,19 @@ def agregar_estacion_hora(viajes: pd.DataFrame) -> pd.DataFrame:
     Espera las columnas inicio_viaje, fin_viaje (datetime), origen_id y destino_id.
     Devuelve estacion_id, hora, salidas, llegadas y flujo_neto, ordenada por estación y hora.
     """
-    sal = viajes.groupby(["origen_id", viajes["inicio_viaje"].dt.floor("h")]).size()
-    lle = viajes.groupby(["destino_id", viajes["fin_viaje"].dt.floor("h")]).size()
+    if {"estacion_id", "hora", "salidas", "llegadas"}.issubset(viajes.columns):
+        conteos = viajes.groupby(["estacion_id", "hora"])[
+            ["salidas", "llegadas"]
+        ].sum()
+        sal = conteos["salidas"]
+        lle = conteos["llegadas"]
+    else:
+        sal = viajes.groupby(
+            ["origen_id", viajes["inicio_viaje"].dt.floor("h")]
+        ).size()
+        lle = viajes.groupby(
+            ["destino_id", viajes["fin_viaje"].dt.floor("h")]
+    ).size()
     sal.index.names = ["estacion_id", "hora"]
     lle.index.names = ["estacion_id", "hora"]
 

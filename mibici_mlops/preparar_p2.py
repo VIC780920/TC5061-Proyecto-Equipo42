@@ -4,25 +4,33 @@ from pathlib import Path
 
 import pandas as pd
 
-from mibici_mlops.config import PROJ_ROOT, VAL_INICIO, TEST_INICIO
+from mibici_mlops.config import (
+    ESTACIONES_PATH,
+    FECHA_FIN,
+    PROJ_ROOT,
+    TEST_INICIO,
+    VAL_INICIO,
+    VIAJES_PATH,
+)
 from mibici_mlops.features import (
     agregar_calendario,
     agregar_capacidad,
+    agregar_estacion_hora,
     agregar_promedios,
     agregar_rezagos,
     crear_etiqueta_p2,
     particion_temporal,
 )
 
-
 def consolidar_flujos_horarios() -> pd.DataFrame:
-    """Consolida salidas y llegadas por estación y hora de todos los meses."""
+    """Consolida los viajes por mes y completa la cuadrícula horaria."""
 
-    carpeta = Path(PROJ_ROOT) / "data" / "processed" / "viajes"
-    archivos = sorted(carpeta.glob("viajes_*.parquet"))
+    archivos = sorted(VIAJES_PATH.glob("viajes_*.parquet"))
 
     if not archivos:
-        raise FileNotFoundError(f"No se encontraron archivos en {carpeta}")
+        raise FileNotFoundError(
+            f"No se encontraron archivos en {VIAJES_PATH}"
+        )
 
     acumulados = []
 
@@ -31,66 +39,44 @@ def consolidar_flujos_horarios() -> pd.DataFrame:
 
         viajes = pd.read_parquet(
             archivo,
-            columns=["inicio_viaje", "fin_viaje", "origen_id", "destino_id"],
+            columns=[
+                "inicio_viaje",
+                "fin_viaje",
+                "origen_id",
+                "destino_id",
+            ],
         )
 
-        salidas = (
-            viajes.groupby(["origen_id", viajes["inicio_viaje"].dt.floor("h")])
-            .size()
-            .rename("salidas")
-        )
+        salidas = viajes.groupby(
+            ["origen_id", viajes["inicio_viaje"].dt.floor("h")]
+        ).size().rename("salidas")
         salidas.index.names = ["estacion_id", "hora"]
 
-        llegadas = (
-            viajes.groupby(["destino_id", viajes["fin_viaje"].dt.floor("h")])
-            .size()
-            .rename("llegadas")
-        )
+        llegadas = viajes.groupby(
+            ["destino_id", viajes["fin_viaje"].dt.floor("h")]
+        ).size().rename("llegadas")
         llegadas.index.names = ["estacion_id", "hora"]
 
-        mensual = pd.concat([salidas, llegadas], axis=1).fillna(0)
-        acumulados.append(mensual.astype("int32"))
+        mensual = pd.concat(
+            [salidas, llegadas], axis=1
+        ).fillna(0)
 
+        acumulados.append(mensual.astype("int32"))
         del viajes
 
-    tabla = pd.concat(acumulados)
+    conteos = pd.concat(acumulados)
+    conteos = (
+        conteos.groupby(level=["estacion_id", "hora"])
+        .sum()
+        .reset_index()
+    )
 
-    tabla = tabla.groupby(level=["estacion_id", "hora"]).sum().reset_index()
-
-    tabla["flujo_neto"] = tabla["llegadas"] - tabla["salidas"]
+    tabla = agregar_estacion_hora(conteos)
 
     print(f"Meses procesados: {len(archivos)}")
-    print(f"Registros estación-hora con movimientos: {len(tabla):,}")
+    print(f"Registros estación-hora: {len(tabla):,}")
 
     return tabla
-
-
-def completar_horas_sin_movimientos(tabla: pd.DataFrame) -> pd.DataFrame:
-    """Completa las horas sin viajes para cada estación."""
-
-    resultados = []
-
-    for estacion_id, grupo in tabla.groupby("estacion_id"):
-        grupo = grupo.sort_values("hora").set_index("hora")
-
-        horas = pd.date_range(
-            start=grupo.index.min(),
-            end=grupo.index.max(),
-            freq="h",
-        )
-
-        completo = grupo.reindex(horas)
-        completo["estacion_id"] = estacion_id
-        completo[["salidas", "llegadas"]] = completo[["salidas", "llegadas"]].fillna(0)
-
-        completo["flujo_neto"] = completo["llegadas"] - completo["salidas"]
-
-        completo.index.name = "hora"
-        resultados.append(completo.reset_index())
-
-    resultado = pd.concat(resultados, ignore_index=True)
-
-    return resultado.sort_values(["estacion_id", "hora"]).reset_index(drop=True)
 
 
 def preparar_base_p2() -> pd.DataFrame:
@@ -98,17 +84,17 @@ def preparar_base_p2() -> pd.DataFrame:
 
     tabla = consolidar_flujos_horarios()
 
-    estaciones = pd.read_parquet(Path(PROJ_ROOT) / "data" / "processed" / "estaciones.parquet")
-
+    estaciones = pd.read_parquet(ESTACIONES_PATH)
     estaciones = estaciones.loc[estaciones["capacidad"] > 0].copy()
 
     tabla = tabla.loc[tabla["estacion_id"].isin(estaciones["estacion_id"])].copy()
-
-    tabla = completar_horas_sin_movimientos(tabla)
     tabla = agregar_capacidad(tabla, estaciones)
 
     # Excluir registros posteriores al periodo del proyecto
-    tabla = tabla.loc[tabla["hora"] < pd.Timestamp("2026-10-01")].copy()
+    fecha_fin_exclusiva = (
+        pd.Timestamp(FECHA_FIN) + pd.Timedelta(days=1)
+    )
+    tabla = tabla.loc[tabla["hora"] < fecha_fin_exclusiva].copy()
 
     return tabla
 
