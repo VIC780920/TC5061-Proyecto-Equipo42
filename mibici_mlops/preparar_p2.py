@@ -1,4 +1,3 @@
-
 """Preparación de datos para el modelo P2 de MiBici."""
 
 from pathlib import Path
@@ -7,13 +6,14 @@ import pandas as pd
 
 from mibici_mlops.config import PROJ_ROOT
 from mibici_mlops.features import (
-    agregar_capacidad,
     agregar_calendario,
-    agregar_rezagos,
+    agregar_capacidad,
     agregar_promedios,
+    agregar_rezagos,
     crear_etiqueta_p2,
     particion_temporal,
 )
+
 
 def consolidar_flujos_horarios() -> pd.DataFrame:
     """Consolida salidas y llegadas por estación y hora de todos los meses."""
@@ -35,18 +35,14 @@ def consolidar_flujos_horarios() -> pd.DataFrame:
         )
 
         salidas = (
-            viajes.groupby(
-                ["origen_id", viajes["inicio_viaje"].dt.floor("h")]
-            )
+            viajes.groupby(["origen_id", viajes["inicio_viaje"].dt.floor("h")])
             .size()
             .rename("salidas")
         )
         salidas.index.names = ["estacion_id", "hora"]
 
         llegadas = (
-            viajes.groupby(
-                ["destino_id", viajes["fin_viaje"].dt.floor("h")]
-            )
+            viajes.groupby(["destino_id", viajes["fin_viaje"].dt.floor("h")])
             .size()
             .rename("llegadas")
         )
@@ -59,11 +55,7 @@ def consolidar_flujos_horarios() -> pd.DataFrame:
 
     tabla = pd.concat(acumulados)
 
-    tabla = (
-        tabla.groupby(level=["estacion_id", "hora"])
-        .sum()
-        .reset_index()
-    )
+    tabla = tabla.groupby(level=["estacion_id", "hora"]).sum().reset_index()
 
     tabla["flujo_neto"] = tabla["llegadas"] - tabla["salidas"]
 
@@ -89,22 +81,16 @@ def completar_horas_sin_movimientos(tabla: pd.DataFrame) -> pd.DataFrame:
 
         completo = grupo.reindex(horas)
         completo["estacion_id"] = estacion_id
-        completo[["salidas", "llegadas"]] = (
-            completo[["salidas", "llegadas"]].fillna(0)
-        )
+        completo[["salidas", "llegadas"]] = completo[["salidas", "llegadas"]].fillna(0)
 
-        completo["flujo_neto"] = (
-            completo["llegadas"] - completo["salidas"]
-        )
+        completo["flujo_neto"] = completo["llegadas"] - completo["salidas"]
 
         completo.index.name = "hora"
         resultados.append(completo.reset_index())
 
     resultado = pd.concat(resultados, ignore_index=True)
 
-    return resultado.sort_values(
-        ["estacion_id", "hora"]
-    ).reset_index(drop=True)
+    return resultado.sort_values(["estacion_id", "hora"]).reset_index(drop=True)
 
 
 def preparar_base_p2() -> pd.DataFrame:
@@ -112,25 +98,17 @@ def preparar_base_p2() -> pd.DataFrame:
 
     tabla = consolidar_flujos_horarios()
 
-    estaciones = pd.read_parquet(
-        Path(PROJ_ROOT) / "data" / "processed" / "estaciones.parquet"
-    )
+    estaciones = pd.read_parquet(Path(PROJ_ROOT) / "data" / "processed" / "estaciones.parquet")
 
-    estaciones = estaciones.loc[
-        estaciones["capacidad"] > 0
-    ].copy()
+    estaciones = estaciones.loc[estaciones["capacidad"] > 0].copy()
 
-    tabla = tabla.loc[
-        tabla["estacion_id"].isin(estaciones["estacion_id"])
-    ].copy()
+    tabla = tabla.loc[tabla["estacion_id"].isin(estaciones["estacion_id"])].copy()
 
     tabla = completar_horas_sin_movimientos(tabla)
     tabla = agregar_capacidad(tabla, estaciones)
 
     # Excluir registros posteriores al periodo del proyecto
-    tabla = tabla.loc[
-       tabla["hora"] < pd.Timestamp("2026-10-01")
-    ].copy()
+    tabla = tabla.loc[tabla["hora"] < pd.Timestamp("2026-10-01")].copy()
 
     return tabla
 
@@ -161,6 +139,16 @@ def generar_dataset_p2() -> pd.DataFrame:
     tabla = crear_etiqueta_p2(
         tabla,
         umbral=0.30,
+    )
+
+    # Riesgo de desabasto o saturación tres horas después
+    tabla["riesgo_p2_t_3h"] = tabla.groupby("estacion_id")["riesgo_p2"].shift(-3)
+
+    print("Calculando baseline estacional P2 (165 horas)...")
+    tabla = agregar_rezagos(
+        tabla,
+        columna="riesgo_p2",
+        rezagos=(165,),
     )
 
     print("Asignando particiones temporales...")

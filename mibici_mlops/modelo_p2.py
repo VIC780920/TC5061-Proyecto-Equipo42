@@ -1,15 +1,12 @@
 """Entrenamiento y evaluación del modelo de clasificación P2 de MiBici."""
 
-import pandas as pd
+from pathlib import Path
 
 import joblib
-from pathlib import Path
-from mibici_mlops.config import PROJ_ROOT
-
+import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
 
-from mibici_mlops.preparar_p2 import generar_dataset_p2
+from mibici_mlops.config import PROJ_ROOT
 
 VARIABLES_P2 = [
     "capacidad",
@@ -25,14 +22,14 @@ VARIABLES_P2 = [
     "salidas_media_4sem",
 ]
 
-OBJETIVO_P2 = "riesgo_p2"
+OBJETIVO_P2 = "riesgo_p2_t_3h"
 
 
 def preparar_datos_modelo(tabla: pd.DataFrame):
     """Prepara entrenamiento, validación y prueba para P2."""
 
     # Excluir registros sin historial suficiente
-    tabla = tabla.dropna(subset=VARIABLES_P2).copy()
+    tabla = tabla.dropna(subset=VARIABLES_P2 + [OBJETIVO_P2]).copy()
 
     # Separación cronológica
     train = tabla[tabla["conjunto"] == "train"]
