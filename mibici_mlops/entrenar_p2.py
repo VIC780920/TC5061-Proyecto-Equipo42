@@ -106,20 +106,31 @@ def evaluar_modelo(modelo, X_val, y_val, X_test, y_test):
 
 
 def guardar_matriz_confusion(modelo, X_test, y_test):
-    """Genera la matriz de confusión de P2 sobre el conjunto de test."""
+    """Genera la matriz de confusión del Random Forest P2 sobre el conjunto de test."""
+    return guardar_matriz_predicciones(
+        y_test,
+        modelo.predict(X_test),
+        "p2_matriz_confusion_test.png",
+        "P2 - Matriz de confusión (test)",
+    )
+
+
+def guardar_matriz_predicciones(y_real, y_pred, nombre_archivo, titulo):
+    """Guarda una matriz de confusión de P2 a partir de etiquetas reales y predichas.
+
+    La usan el Random Forest y el baseline, para que cada run tenga su artefacto.
+    """
     from mibici_mlops.config import FIGURES_DIR
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    ruta = FIGURES_DIR / "p2_matriz_confusion_test.png"
-
-    predicciones = modelo.predict(X_test)
+    ruta = FIGURES_DIR / nombre_archivo
 
     fig, ax = plt.subplots(figsize=(8, 6))
 
     ConfusionMatrixDisplay.from_predictions(
-        y_test,
-        predicciones,
+        y_real,
+        y_pred,
         labels=[0, 1, 2],
         display_labels=["Bajo riesgo", "Desabasto", "Saturación"],
         cmap="Blues",
@@ -127,7 +138,7 @@ def guardar_matriz_confusion(modelo, X_test, y_test):
         colorbar=False,
     )
 
-    ax.set_title("P2 - Matriz de confusión (test)")
+    ax.set_title(titulo)
     fig.tight_layout()
     fig.savefig(ruta, dpi=150)
     plt.close(fig)
@@ -168,6 +179,14 @@ def main():
 
     print(f"Metricas baseline P2: {metricas_baseline}")
 
+    test_baseline = tabla_baseline[tabla_baseline["conjunto"] == "test"]
+    ruta_matriz_baseline = guardar_matriz_predicciones(
+        test_baseline["riesgo_p2_t_1h"].astype(int),
+        test_baseline["riesgo_p2_lag_167"].astype(int),
+        "p2_baseline_matriz_confusion_test.png",
+        "P2 baseline (semana anterior) - Matriz de confusión (test)",
+    )
+
     registrar_run(
         pregunta="P2",
         run_name="p2-baseline-semana-anterior",
@@ -180,6 +199,7 @@ def main():
             "n_filas_test": int((tabla_baseline["conjunto"] == "test").sum()),
         },
         metricas=metricas_baseline,
+        artefactos=[ruta_matriz_baseline],
     )
 
     del tabla_baseline
