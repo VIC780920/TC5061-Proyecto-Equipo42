@@ -10,6 +10,7 @@ from loguru import logger
 import matplotlib
 import pandas as pd
 from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
 from sklearn.metrics import adjusted_rand_score, davies_bouldin_score, silhouette_score
 from sklearn.preprocessing import StandardScaler
 
@@ -28,7 +29,7 @@ from mibici_mlops.features import (
 
 RUN_NAME = "p3-baseline-kmeans"
 K_CANDIDATOS = range(3, 9)
-
+VARIANZA_PCA = 0.90
 
 def cargar_datos_p3() -> tuple[pd.DataFrame, pd.DataFrame]:
     """Carga los viajes procesados y la nomenclatura de estaciones."""
@@ -129,6 +130,72 @@ def escalar_perfiles_p3(
         escalados[conjunto] = escalado
 
     return escalados, scaler
+
+def reducir_dimensiones_pca(
+    escalados: dict[str, pd.DataFrame],
+    varianza_objetivo: float = VARIANZA_PCA,
+) -> tuple[dict[str, pd.DataFrame], PCA]:
+    """Reduce las features de P3 con PCA ajustado únicamente sobre train.
+
+    Se conservan suficientes componentes para explicar al menos el porcentaje
+    de varianza indicado. Validation y test se transforman usando el mismo PCA
+    aprendido con train, evitando fuga de información futura.
+    """
+    columnas_features = [
+        columna
+        for columna in escalados["train"].columns
+        if columna != "estacion_id"
+    ]
+
+    pca = PCA(
+        n_components=varianza_objetivo,
+        svd_solver="full",
+    )
+
+    X_train_pca = pca.fit_transform(
+        escalados["train"][columnas_features]
+    )
+
+    nombres_componentes = [
+        f"pc_{i + 1:02d}"
+        for i in range(X_train_pca.shape[1])
+    ]
+
+    reducidos = {}
+
+    for conjunto in ["train", "val", "test"]:
+        perfil = escalados[conjunto]
+
+        if conjunto == "train":
+            valores = X_train_pca
+        else:
+            valores = pca.transform(
+                perfil[columnas_features]
+            )
+
+        reducido = pd.DataFrame(
+            valores,
+            columns=nombres_componentes,
+            index=perfil.index,
+        )
+
+        reducido.insert(
+            0,
+            "estacion_id",
+            perfil["estacion_id"].to_numpy(),
+        )
+
+        reducidos[conjunto] = reducido
+
+    logger.info(
+        "P3 PCA: "
+        f"{len(columnas_features)} features -> "
+        f"{len(nombres_componentes)} componentes; "
+        f"varianza explicada="
+        f"{pca.explained_variance_ratio_.sum():.4f}"
+    )
+
+    return reducidos, pca
 
 def evaluar_kmeans_p3(
     escalados: dict[str, pd.DataFrame],
@@ -287,6 +354,94 @@ def entrenar_modelo_final_p3(
 
     return modelo, scaler, resultado_final, resultado_test
 
+def entrenar_modelo_final_p3_pca(
+    perfil_final: pd.DataFrame,
+    perfil_test: pd.DataFrame,
+    k: int,
+    varianza_objetivo: float = VARIANZA_PCA,
+) -> tuple[
+    KMeans,
+    StandardScaler,
+    PCA,
+    pd.DataFrame,
+    pd.DataFrame,
+]:
+    """Entrena el candidato PCA + KMeans con train + validation.
+
+    El scaler y PCA se ajustan únicamente sobre el perfil final de 12 meses.
+    Test se transforma usando los objetos ya ajustados, sin fuga de información.
+    """
+    columnas_features = [
+        columna
+        for columna in perfil_final.columns
+        if columna != "estacion_id"
+    ]
+
+    columnas_test = [
+        columna
+        for columna in perfil_test.columns
+        if columna != "estacion_id"
+    ]
+
+    if columnas_test != columnas_features:
+        raise ValueError(
+            "Las features de test no coinciden con las del entrenamiento final"
+        )
+
+    scaler = StandardScaler()
+
+    X_final_escalado = scaler.fit_transform(
+        perfil_final[columnas_features]
+    )
+
+    X_test_escalado = scaler.transform(
+        perfil_test[columnas_features]
+    )
+
+    pca = PCA(
+        n_components=varianza_objetivo,
+        svd_solver="full",
+    )
+
+    X_final_pca = pca.fit_transform(
+        X_final_escalado
+    )
+
+    X_test_pca = pca.transform(
+        X_test_escalado
+    )
+
+    modelo = KMeans(
+        n_clusters=k,
+        random_state=SEED,
+        n_init=20,
+    )
+
+    labels_final = modelo.fit_predict(X_final_pca)
+    labels_test = modelo.predict(X_test_pca)
+
+    resultado_final = perfil_final[["estacion_id"]].copy()
+    resultado_final["cluster"] = labels_final
+
+    resultado_test = perfil_test[["estacion_id"]].copy()
+    resultado_test["cluster"] = labels_test
+
+    logger.info(
+        "P3 PCA final: "
+        f"{len(columnas_features)} features -> "
+        f"{pca.n_components_} componentes; "
+        f"varianza explicada="
+        f"{pca.explained_variance_ratio_.sum():.4f}"
+    )
+
+    return (
+        modelo,
+        scaler,
+        pca,
+        resultado_final,
+        resultado_test,
+    )
+
 def evaluar_modelo_final_p3(
     modelo: KMeans,
     scaler: StandardScaler,
@@ -323,6 +478,62 @@ def evaluar_modelo_final_p3(
 
     train_davies_bouldin = davies_bouldin_score(
         X_final,
+        labels_final,
+    )
+
+    comparables = resultado_final.merge(
+        resultado_test,
+        on="estacion_id",
+        suffixes=("_final", "_test"),
+    )
+
+    test_estabilidad_ari = adjusted_rand_score(
+        comparables["cluster_final"],
+        comparables["cluster_test"],
+    )
+
+    return {
+        "train_silhouette": train_silhouette,
+        "train_davies_bouldin": train_davies_bouldin,
+        "test_estabilidad_ari": test_estabilidad_ari,
+        "test_estaciones_comparables": float(len(comparables)),
+    }
+
+def evaluar_modelo_final_p3_pca(
+    modelo: KMeans,
+    scaler: StandardScaler,
+    pca: PCA,
+    perfil_final: pd.DataFrame,
+    resultado_final: pd.DataFrame,
+    resultado_test: pd.DataFrame,
+) -> dict:
+    """Evalúa separación y estabilidad temporal de PCA + KMeans."""
+
+    columnas_features = [
+        columna
+        for columna in perfil_final.columns
+        if columna != "estacion_id"
+    ]
+
+    X_final_escalado = scaler.transform(
+        perfil_final[columnas_features]
+    )
+
+    X_final_pca = pca.transform(
+        X_final_escalado
+    )
+
+    labels_final = modelo.predict(
+        X_final_pca
+    )
+
+    train_silhouette = silhouette_score(
+        X_final_pca,
+        labels_final,
+    )
+
+    train_davies_bouldin = davies_bouldin_score(
+        X_final_pca,
         labels_final,
     )
 
@@ -532,6 +743,112 @@ def main(run_name: str = RUN_NAME) -> str:
         modelo=modelo,
     )
 
+def main_pca(run_name: str = "p3-pca-kmeans") -> str:
+    """Ejecuta y registra en MLflow el candidato PCA + KMeans de P3."""
+
+    logger.info("P3 PCA: cargando datos")
+    viajes, estaciones = cargar_datos_p3()
+
+    # 1. Construir perfiles train / val / test.
+    perfiles = construir_perfiles_p3(
+        viajes,
+        estaciones,
+    )
+
+    # 2. Escalar con train y ajustar PCA únicamente con train.
+    escalados, _ = escalar_perfiles_p3(perfiles)
+
+    reducidos, pca_seleccion = reducir_dimensiones_pca(
+        escalados
+    )
+
+    # 3. Seleccionar k usando validation.
+    _resultados_k, mejor_k = evaluar_kmeans_p3(
+        reducidos
+    )
+    # 4. Construir perfil final train + validation.
+    perfil_final = construir_perfil_final_p3(
+        viajes,
+        estaciones,
+    )
+
+    # 5. Entrenar scaler + PCA + KMeans final.
+    (
+        modelo,
+        scaler,
+        pca,
+        resultado_final,
+        resultado_test,
+    ) = entrenar_modelo_final_p3_pca(
+        perfil_final,
+        perfiles["test"],
+        mejor_k,
+    )
+
+    # 6. Evaluación final.
+    metricas = evaluar_modelo_final_p3_pca(
+        modelo,
+        scaler,
+        pca,
+        perfil_final,
+        resultado_final,
+        resultado_test,
+    )
+
+    logger.info(
+        f"P3 PCA métricas finales: {metricas}"
+    )
+
+    # 7. Artefacto geográfico.
+    FIGURES_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    ruta_mapa = (
+        FIGURES_DIR
+        / "p3_pca_mapa_clusters.png"
+    )
+
+    graficar_mapa_clusters(
+        resultado_final,
+        estaciones,
+        ruta_mapa,
+    )
+
+    # 8. Parámetros reproducibles.
+    params = {
+        "modelo": "PCA+KMeans",
+        "k": mejor_k,
+        "k_candidatos": "3,4,5,6,7,8",
+        "criterio_seleccion_k": "val_silhouette",
+        "n_init": 20,
+        "escalador": "StandardScaler",
+        "pca_varianza_objetivo": VARIANZA_PCA,
+        "pca_componentes_train": pca_seleccion.n_components_,
+        "pca_componentes_final": pca.n_components_,
+        "pca_varianza_final": float(
+            pca.explained_variance_ratio_.sum()
+        ),
+        "n_features_originales": len(perfil_final.columns) - 1,
+        "n_estaciones_train": len(perfiles["train"]),
+        "n_estaciones_val": len(perfiles["val"]),
+        "n_estaciones_final_12m": len(perfil_final),
+        "n_estaciones_test": len(perfiles["test"]),
+        "granularidad": "estacion",
+        "ubicacion_en_clustering": False,
+    }
+
+    return registrar_run(
+        pregunta="P3",
+        run_name=run_name,
+        params=params,
+        metricas=metricas,
+        artefactos=[
+            ruta_mapa,
+        ],
+        modelo=modelo,
+    )
 
 if __name__ == "__main__":
     main()
