@@ -1,125 +1,127 @@
-# MiBici MLOps
+# MiBici MLOps · TC5061 Equipo 42
 
 <a target="_blank" href="https://cookiecutter-data-science.drivendata.org/">
     <img src="https://img.shields.io/badge/CCDS-Project%20template-328F97?logo=cookiecutter" />
 </a>
 
-Pipeline reproducible de Machine Learning para el análisis de datos de MiBici
+Pipeline reproducible de Machine Learning sobre los datos abiertos de **MiBici**, el sistema de bicicleta pública del Área Metropolitana de Guadalajara. Primera entrega del proyecto integrador de TC5061 Operaciones de Aprendizaje Automático (Tecnológico de Monterrey).
 
-## Project Organization
+## Propósito
+
+Responder con Machine Learning tres preguntas sobre la operación de MiBici y dejar una base reproducible: ingesta versionada, variables sin información del futuro, baselines registrados en MLflow y un flujo de trabajo en equipo con Pull Requests. La propuesta completa está en el ML Canvas ([`references/ml_canvas.md`](references/ml_canvas.md)) y la arquitectura en [`references/arquitectura.png`](references/arquitectura.png).
+
+## Preguntas del proyecto
+
+| # | Pregunta | Tarea | Formulación | Usuario |
+|---|---|---|---|---|
+| P1 | ¿Cuántos viajes iniciarán en una estación en la siguiente hora? | Regresión | Salidas por estación × hora, horizonte 1 h | Operador del sistema |
+| P2 | ¿La estación se quedará sin bicis o sin anclajes? | Clasificación (3 clases) | Flujo neto de la hora / capacidad: < −0.30 desabasto, > +0.30 saturación; horizonte 1 h | Equipo de rebalanceo |
+| P3 | ¿Qué grupos de estaciones comparten patrones de uso? | Clustering | Perfil horario de salidas y llegadas (entre semana y fin de semana) + flujo neto relativo | Planeación urbana |
+
+## Datos
+
+- **Fuente:** [portal de datos abiertos de MiBici](https://www.mibici.net/es/datos-abiertos/): viajes mensuales en CSV y nomenclatura de estaciones (`nomenclatura_2026_09.csv`). Las URLs exactas de cada mes están en `mibici_mlops/config.py`.
+- **Rango:** 15 meses, de julio de 2025 a septiembre de 2026 → **5,616,821 viajes** (tras eliminar 758 duplicados) y **484 estaciones**.
+- **Partición temporal:** entrenamiento jul-2025 a mar-2026 · validación abr a jun-2026 · test jul a sep-2026 (fechas de corte en `config.py`).
+- **Versionado:** `data_manifest.json` (en Git) guarda número de registros y SHA-256 de cada archivo crudo y procesado; su hash es el `data_version` que se registra en MLflow.
+- **Datos personales:** la ingesta solo lee 5 columnas (viaje, inicio, fin, origen, destino); `Usuario_Id`, `Genero` y `Año_de_nacimiento` nunca se leen ni se guardan.
+- **Uso:** el portal no publica una licencia abierta explícita; los datos se usan con fines académicos y **no se redistribuyen** (están en `.gitignore`; se descargan con `make data`).
+
+## Estructura del repositorio
 
 ```
-├── LICENSE            <- Open-source license if one is chosen
-├── Makefile           <- Makefile with convenience commands like `make data` or `make train`
-├── README.md          <- The top-level README for developers using this project.
-├── data
-│   ├── external       <- Data from third party sources.
-│   ├── interim        <- Intermediate data that has been transformed.
-│   ├── processed      <- The final, canonical data sets for modeling.
-│   └── raw            <- The original, immutable data dump.
-│
-├── docs               <- A default mkdocs project; see www.mkdocs.org for details
-│
-├── models             <- Trained and serialized models, model predictions, or model summaries
-│
-├── notebooks          <- Jupyter notebooks. Naming convention is a number (for ordering),
-│                         the creator's initials, and a short `-` delimited description, e.g.
-│                         `1.0-jqp-initial-data-exploration`.
-│
-├── pyproject.toml     <- Project configuration file with package metadata for 
-│                         mibici_mlops and configuration for tools like black
-│
-├── references         <- Data dictionaries, manuals, and all other explanatory materials.
-│
-├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
-│   └── figures        <- Generated graphics and figures to be used in reporting
-│
-├── requirements.txt   <- The requirements file for reproducing the analysis environment, e.g.
-│                         generated with `pip freeze > requirements.txt`
-│
-├── setup.cfg          <- Configuration file for flake8
-│
-└── mibici_mlops   <- Source code for use in this project.
-    │
-    ├── __init__.py             <- Makes mibici_mlops a Python module
-    │
-    ├── config.py               <- Store useful variables and configuration
-    │
-    ├── dataset.py              <- Scripts to download or generate data
-    │
-    ├── features.py             <- Code to create features for modeling
-    │
-    ├── modeling                
-    │   ├── __init__.py 
-    │   ├── predict.py          <- Code to run model inference with trained models          
-    │   └── train.py            <- Code to train models
-    │
-    └── plots.py                <- Code to create visualizations
+├── Makefile                 <- make requirements | data | experiments | test | lint
+├── README.md
+├── data_manifest.json       <- Versión de los datos (registros + SHA-256 por archivo)
+├── pyproject.toml           <- Metadatos del paquete mibici_mlops y configuración de ruff
+├── requirements.txt         <- Dependencias con versión fija (Python 3.12)
+├── data/                    <- Fuera de Git: raw/ (CSV originales) y processed/ (Parquet)
+├── docs/                    <- Proyecto mkdocs de la plantilla
+├── models/                  <- Modelos serializados (fuera de Git)
+├── notebooks/               <- Solo exploración: 1.0-ce-exploracion-mibici.ipynb
+├── references/              <- ML Canvas (md, png, html) y diagrama de arquitectura (png, dot)
+├── reports/figures/         <- Figuras generadas por los experimentos (fuera de Git)
+├── tests/                   <- Pruebas de ingesta, features de P3 y modelo P2 (pytest)
+└── mibici_mlops/            <- Código fuente
+    ├── config.py            <- Rutas, fechas, partición, semilla, URLs y MLflow (un solo lugar)
+    ├── dataset.py           <- Ingesta: descarga, normalización y Parquet
+    ├── manifest.py          <- Genera data_manifest.json
+    ├── features.py          <- Tabla estación × hora, calendario, rezagos, etiqueta P2, perfiles P3
+    ├── tracking.py          <- registrar_run(): registro común en MLflow (tags, params, validaciones)
+    ├── preparar_p2.py, modelo_p2.py, entrenar_p2.py   <- Preparación, modelo y entrenamiento de P2
+    └── modeling/
+        ├── p1.py, p2.py, p3.py      <- main() de cada pregunta (registra su run)
+        └── run_experiments.py       <- Orquesta P1, P2 y P3 (make experiments)
 ```
 
---------
+## Instalación
 
-## Modelo P2: clasificación de riesgo de estaciones MiBici
-
-### Objetivo
-
-Desarrollar un modelo de clasificación que identifique tres categorías de riesgo a partir de los movimientos históricos de bicicletas por estación y hora:
-
-- **Clase 0:** bajo riesgo.
-- **Clase 1:** riesgo de desabasto.
-- **Clase 2:** riesgo de saturación.
-
-Las etiquetas se construyen mediante una heurística basada en los flujos horarios y la capacidad registrada de las estaciones. No representan mediciones directas de la ocupación real.
-
-### Preparación de datos
-
-El pipeline procesa 15 meses de datos de MiBici, consolida los movimientos por estación y hora, completa las horas sin movimientos e incorpora la capacidad de cada estación.
-
-Se generan variables de calendario, rezagos históricos y promedios móviles. Los registros sin suficiente historial para calcular las características se excluyen del entrenamiento.
-
-La separación temporal utiliza los siguientes periodos:
-
-- **Train:** julio de 2025 a marzo de 2026.
-- **Validation:** abril a junio de 2026.
-- **Test:** julio a septiembre de 2026.
-
-### Entrenamiento
-
-Para ejecutar el entrenamiento reproducible:
+Requiere Python 3.12, `make` y `curl`.
 
 ```bash
-python -m mibici_mlops.entrenar_p2
+git clone https://github.com/a01797754-dotAPML/TC5061-Proyecto-Equipo42.git
+cd TC5061-Proyecto-Equipo42
+conda create -n mibici python=3.12 -y && conda activate mibici   # o un venv con Python 3.12
+make requirements                                                # instala dependencias fijas + el paquete
 ```
 
-El modelo utiliza Random Forest con 50 árboles, profundidad máxima de 12, un mínimo de 20 muestras por hoja y pesos personalizados para las clases `{0: 1, 1: 10, 2: 10}`.
-
-El artefacto se guarda en `models/modelo_p2.joblib`. Este archivo está excluido del repositorio mediante `.gitignore`; debe generarse localmente ejecutando el entrenamiento.
-
-### Evaluación
-
-El modelo seleccionado obtuvo los siguientes resultados en el conjunto de prueba:
-
-| Métrica | Resultado |
-|---|---:|
-| Accuracy | 0.97 |
-| Macro-F1 | 0.46 |
-| Recall de desabasto | 0.30 |
-| Recall de saturación | 0.19 |
-
-Las métricas detalladas y la matriz de confusión están registradas en `reports/metrics/metricas_p2.json`.
-
-### Pruebas automatizadas
-
-Para ejecutar las pruebas específicas de P2:
+## Ingesta de datos
 
 ```bash
-python -m pytest tests/test_modelo_p2.py -v
+make data
 ```
 
-Las pruebas verifican las variables predictoras, los parámetros de Random Forest y el guardado y recuperación del modelo.
+Descarga los 15 meses y la nomenclatura, normaliza codificación, columnas y fechas, elimina duplicados, guarda Parquet en `data/processed/` y regenera `data_manifest.json`. Desde un clon limpio, el manifiesto resulta idéntico al versionado (`data_version = 2a196cfa2823`).
 
-### Limitaciones
+## Experimento base
 
-El dataset presenta un fuerte desbalance de clases. Aunque la exactitud global es alta, el recall de las clases minoritarias continúa siendo limitado. Por ello, el modelo debe considerarse una primera versión experimental y no un sistema operativo de alertas.
+```bash
+make experiments                                                # P1, P2 y P3 → experimento mibici-equipo42
+python -m mibici_mlops.modeling.run_experiments --pregunta P2   # una sola pregunta (repetible)
+python -c "from mibici_mlops.modeling import p3; p3.main_pca()" # candidato P3: PCA + KMeans
+python -m mlflow ui --backend-store-uri sqlite:///mlflow.db     # interfaz en http://127.0.0.1:5000
+```
 
-Las etiquetas son aproximaciones heurísticas derivadas de los flujos y la capacidad registrada; no se ha demostrado que correspondan directamente a la disponibilidad real de bicicletas.
+`make experiments` se niega a correr con cambios sin commitear (salvo `--permitir-cambios`), sigue con las demás preguntas si una falla y termina con código 1 si hubo errores. Usar `python -m mlflow` garantiza la versión de MLflow del entorno.
+
+| Run | Métricas de test |
+|---|---|
+| `p1-baseline-semana-anterior` | MAE 0.942 · RMSE 1.921 |
+| `p2-baseline-semana-anterior` | macro-F1 0.473 · recall desabasto 0.182 · recall saturación 0.243 |
+| `p2-random-forest` | macro-F1 0.512 · recall desabasto 0.382 · recall saturación 0.458 |
+| `p3-baseline-kmeans` | silhouette 0.074 · Davies-Bouldin 3.05 · ARI 0.686 |
+| `p3-pca-kmeans` | silhouette 0.095 · Davies-Bouldin 2.72 · ARI 0.633 |
+
+Pruebas: `make test` (o `python -m pytest tests`).
+
+## Buenas prácticas aplicadas
+
+| Práctica | Cómo la aplicamos |
+|---|---|
+| Un experimento, runs con nombre descriptivo | Experimento `mibici-equipo42`; nombres como `p2-random-forest`, nunca aleatorios |
+| Parámetros para reproducir | `registrar_run` agrega siempre fechas, `val_inicio`, `test_inicio`, `data_version` y `seed`; cada pregunta agrega su modelo e hiperparámetros |
+| Run ligado a código y pregunta | Tags `equipo`, `pregunta`, `git_commit` y `git_cambios_sin_commit` |
+| Métricas con el conjunto en el nombre | `registrar_run` rechaza métricas sin prefijo `train_`, `val_` o `test_` |
+| Sin credenciales ni datos personales | La ingesta no lee columnas de usuario; `registrar_run` rechaza parámetros con esos nombres; `.env` en `.gitignore` |
+| Notebooks solo para exploración | La lógica vive en `mibici_mlops/`; el notebook sigue la convención `1.0-iniciales-descripcion` |
+| Configuración en un solo lugar | `config.py` (rutas, fechas, semilla, URLs, MLflow) |
+| Dependencias fijas y entorno reproducible | `requirements.txt` con versiones fijas, verificado en un entorno nuevo desde un clon limpio |
+| Nada de datos, modelos ni MLflow en Git | `.gitignore` excluye `data/`, `models/`, `mlruns/`, `mlartifacts/`, `mlflow.db`, `.env` y salidas de `reports/` |
+| Cambios a `main` solo por PR revisado | Rama `main` protegida (requiere aprobación) |
+
+## Flujo de trabajo con Git (GitHub Flow)
+
+1. `main` está protegida: nadie hace push directo; todo entra por Pull Request con al menos una aprobación.
+2. Cada cambio en su rama, creada desde `main` actualizado: `tipo/descripcion-corta` (por ejemplo `feat/p3-pca-kmeans`, `docs/canvas-p2-visual`, `chore/requirements-versiones`).
+3. Commits con [Conventional Commits](https://www.conventionalcommits.org/): `feat`, `fix`, `docs`, `chore`, `refactor`, `test` con alcance opcional, por ejemplo `fix(p2): registrar la matriz de confusión del baseline`.
+4. Antes de pedir revisión se trae `main` a la rama y se resuelven conflictos en la rama, no en `main`.
+5. Se hace `git status` antes de cada `git add` para no subir datos, modelos ni `mlflow.db`.
+
+## Integrantes y roles
+
+| Integrante | Matrícula | Rol |
+|---|---|---|
+| Carlos Eduardo Medina Flores | A01753742 | ML Canvas y formulación de P1–P3, pipeline y arquitectura; tabla estación × hora en `features.py`, `tracking.py` (`registrar_run`) y baseline de P1; notebook de exploración |
+| Víctor Manuel Martínez Zarate | A01840404 | Ingesta reproducible (`dataset.py`, `manifest.py`) y versionado SHA-256; P2: etiqueta de riesgo, variables (incluidas tasas históricas), baseline, Random Forest y su registro en MLflow; pruebas automatizadas de ingesta y P2; propuesta del runner por pregunta (`--pregunta`) integrado en `run_experiments` |
+| Andrea Paola Martínez López | A01797754 | Repositorio con Cookiecutter Data Science, `.gitignore` y GitHub Flow; P3: perfiles de uso, KMeans y candidato PCA + KMeans |
+| Carlos David Martínez Calva | A01056864 | `run_experiments` y `make experiments`, corrida oficial desde un clon limpio y evidencia de MLflow; revisión de PRs; integración del documento de la propuesta y README |
