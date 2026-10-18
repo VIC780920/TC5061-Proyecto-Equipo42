@@ -27,8 +27,19 @@ def agregar_estacion_hora(viajes: pd.DataFrame) -> pd.DataFrame:
     Espera las columnas inicio_viaje, fin_viaje (datetime), origen_id y destino_id.
     Devuelve estacion_id, hora, salidas, llegadas y flujo_neto, ordenada por estación y hora.
     """
-    sal = viajes.groupby(["origen_id", viajes["inicio_viaje"].dt.floor("h")]).size()
-    lle = viajes.groupby(["destino_id", viajes["fin_viaje"].dt.floor("h")]).size()
+    if {"estacion_id", "hora", "salidas", "llegadas"}.issubset(viajes.columns):
+        conteos = viajes.groupby(["estacion_id", "hora"])[
+            ["salidas", "llegadas"]
+        ].sum()
+        sal = conteos["salidas"]
+        lle = conteos["llegadas"]
+    else:
+        sal = viajes.groupby(
+            ["origen_id", viajes["inicio_viaje"].dt.floor("h")]
+        ).size()
+        lle = viajes.groupby(
+            ["destino_id", viajes["fin_viaje"].dt.floor("h")]
+    ).size()
     sal.index.names = ["estacion_id", "hora"]
     lle.index.names = ["estacion_id", "hora"]
 
@@ -124,4 +135,36 @@ def particion_temporal(tabla: pd.DataFrame, columna: str = "hora") -> pd.DataFra
     tabla["conjunto"] = "train"
     tabla.loc[t >= pd.Timestamp(VAL_INICIO), "conjunto"] = "val"
     tabla.loc[t >= pd.Timestamp(TEST_INICIO), "conjunto"] = "test"
+    return tabla
+
+def crear_etiqueta_p2(
+    tabla: pd.DataFrame,
+    umbral: float = 0.30
+) -> pd.DataFrame:
+    """
+    Crea una etiqueta proxy de riesgo basada en
+    el flujo neto horario respecto a la capacidad.
+
+    0 = Riesgo bajo
+    1 = Riesgo de desabasto
+    2 = Riesgo de saturación
+    """
+    tabla = tabla.copy()
+
+    tabla["flujo_relativo"] = (
+        tabla["flujo_neto"] / tabla["capacidad"]
+    )
+
+    tabla["riesgo_p2"] = 0
+
+    tabla.loc[
+        tabla["flujo_relativo"] < -umbral,
+        "riesgo_p2"
+    ] = 1
+
+    tabla.loc[
+        tabla["flujo_relativo"] > umbral,
+        "riesgo_p2"
+    ] = 2
+
     return tabla
