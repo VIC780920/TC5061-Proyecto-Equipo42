@@ -233,3 +233,6 @@ models/*
 *.onnx
 *.pt
 *.pth
+# Salidas de los experimentos (se registran como artefactos en MLflow)
+reports/figures/p*_*.png
+reports/metrics/
