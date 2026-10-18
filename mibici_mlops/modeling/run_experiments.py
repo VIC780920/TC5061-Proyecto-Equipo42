@@ -4,11 +4,18 @@ Corre el main() de cada pregunta, sigue con las demás si alguna falla y termina
 con código de salida 1 si hubo errores. Por reproducibilidad, se niega a correr
 con cambios sin commitear (salvo --permitir-cambios).
 
-Uso desde la raíz del repo:  python -m mibici_mlops.modeling.run_experiments
+Uso desde la raíz del repo:
+    make experiments                                               # P1, P2 y P3 (corrida oficial)
+    python -m mibici_mlops.modeling.run_experiments                # igual que make experiments
+    python -m mibici_mlops.modeling.run_experiments --pregunta P2  # solo una pregunta
+    python -m mibici_mlops.modeling.run_experiments --pregunta P1 --pregunta P3
+
+La opción --pregunta viene del runner por pregunta de Víctor (PR #5), integrado aquí.
 """
 
 from dataclasses import dataclass
 import importlib
+from typing import Annotated
 
 from loguru import logger
 import typer
@@ -85,12 +92,39 @@ class OrquestadorExperimentos:
             logger.info(f" {r.pregunta} * {r.estado} * {r.detalle}")
 
 
+def seleccionar(preguntas: list[str] | None) -> list[Experimento]:
+    """Devuelve los experimentos pedidos (todos si no se pide ninguno).
+
+    Rechaza preguntas que no están en EXPERIMENTOS para no terminar "sin correr nada" en silencio.
+    """
+    if not preguntas:
+        return EXPERIMENTOS
+    pedidas = {p.strip().upper() for p in preguntas}
+    validas = {e.pregunta for e in EXPERIMENTOS}
+    desconocidas = sorted(pedidas - validas)
+    if desconocidas:
+        raise typer.BadParameter(
+            f"Pregunta(s) desconocida(s): {desconocidas}. Opciones: {sorted(validas)}",
+            param_hint="--pregunta",
+        )
+    return [e for e in EXPERIMENTOS if e.pregunta in pedidas]
+
+
 @app.command()
 def main(
+    preguntas: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--pregunta",
+            help="Pregunta a correr (P1, P2 o P3). Se puede repetir. Sin esta opción corren todas.",
+        ),
+    ] = None,
     permitir_cambios: bool = typer.Option(
         False, help="Correr aunque haya cambios sin commitear (el run quedará marcado)."
     ),
 ):
+    seleccion = seleccionar(preguntas)
+
     # 5: con obtener_git_commit(), si hay cambios y no se permite → logger.error con
     #         la razón y raise typer.Exit(code=1)
     commit, con_cambios = obtener_git_commit()
@@ -104,7 +138,7 @@ def main(
 
     # 6: crear el orquestador, ejecutar, imprimir el resumen y, si algún resultado
     #         no es "ok", terminar con typer.Exit(code=1)
-    orquestador = OrquestadorExperimentos(EXPERIMENTOS)
+    orquestador = OrquestadorExperimentos(seleccion)
     resultados = orquestador.ejecutar()
     OrquestadorExperimentos.resumen(resultados)
 
