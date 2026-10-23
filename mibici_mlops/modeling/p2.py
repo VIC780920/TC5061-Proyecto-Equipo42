@@ -33,7 +33,12 @@ def train(model: str, params: dict) -> str:
     from mibici_mlops.modeling.p2_plots import registrar_graficas_p2
     from mibici_mlops.tracking import iniciar_run, registrar_resultados
 
-    etapa = "search" if model == "rf-search" else "candidate"
+    if model == "baseline":
+        etapa = "baseline"
+    elif model == "rf-search":
+        etapa = "search"
+    else:
+        etapa = "candidate"
 
     with iniciar_run(
         pregunta="P2",
@@ -58,6 +63,15 @@ def train(model: str, params: dict) -> str:
             mlflow.set_tag("best_child_run_id", mejor["run_id"])
             mlflow.set_tag("best_candidate", mejor["nombre"])
             mlflow.log_params(mejor["params"])
+        elif model == "baseline":
+            from mibici_mlops.modelo_p2 import crear_modelo_p2
+
+            candidato = crear_modelo_p2()
+            print("Entrenando baseline P2", flush=True)
+            candidato.fit(X_train, y_train)
+            metricas = evaluar_candidato_p2(
+                candidato, X_val, y_val
+            )
         else:
             candidato = crear_candidato_p2(model, params)
             print(f"Entrenando candidato: {model}", flush=True)
