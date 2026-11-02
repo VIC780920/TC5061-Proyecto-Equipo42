@@ -23,7 +23,7 @@ def registrar(archivo, url=None):
         raise FileNotFoundError(archivo)
 
     resultado = {
-        "ruta": str(archivo.relative_to(PROJ_ROOT)),
+        "ruta": archivo.relative_to(PROJ_ROOT).as_posix(),
         "sha256": sha256(archivo),
         "bytes": archivo.stat().st_size,
     }

@@ -479,7 +479,7 @@ Las herramientas de seguridad se ejecutan en el entorno `auditoria`:
 
 ```powershell
 conda create -n auditoria python=3.12 -y
-conda run -n auditoria python -m pip install bandit==1.9.4 pip-audit==2.10.1
+conda run -n auditoria python -m pip install -r requirements-security.txt
 ```
 
 ### Comando único
@@ -510,7 +510,7 @@ La ejecución realizada el 1 de noviembre de 2026 produjo los siguientes resulta
 
 | Validación | Resultado |
 |---|---|
-| PyTest general | 47 pruebas aprobadas, 1 omitida y 9 advertencias |
+| PyTest general | 89 pruebas aprobadas, 1 omitida y 11 advertencias |
 | DeepChecks | Validación de integridad y drift ejecutada correctamente |
 | Pruebas de DeepChecks | 7 pruebas aprobadas y 1 advertencia interna de DeepChecks |
 | Bandit | Sin hallazgos de severidad media o alta |
