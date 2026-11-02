@@ -337,7 +337,7 @@ El comando falla si Bandit encuentra hallazgos de severidad media o alta, o si p
 - Solo P1: `python -m pytest tests/test_features_p1.py -v`
 - Todas las pruebas: `python -m pytest -q` (o `make test`)
 
-**Resultado:** 23 pruebas de P1 aprobadas; en la suite completa, 70 aprobadas y 1 omitida (`test_validacion.py`, que solo corre en el entorno de DeepChecks).
+**Resultado:** las 23 pruebas de P1 aprueban. La captura de la suite completa es de cuando se integraron (70 aprobadas y 1 omitida, `test_validacion.py`, que solo corre en el entorno de DeepChecks); el total con todas las pruebas del equipo integradas está en la sección de ejecución completa de la Actividad 7.
 
 ![Pruebas de P1](docs/evidencias/pytest_p1_detalle.png)
 
