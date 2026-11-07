@@ -548,3 +548,153 @@ Los hallazgos detectados por DeepChecks, como valores faltantes esperados, corre
 ![Comando único de la Actividad 7](docs/evidencias/actividad7_comando_unico.png)
 
 De esta forma, las pruebas y los chequeos de calidad y seguridad pueden reproducirse desde un único punto de entrada, manteniendo separados los entornos que requieren versiones de dependencias diferentes.
+## Servicio de inferencia con FastAPI y contenedor — Actividad 8
+
+El modelo **P1 (demanda de salidas por estación y hora)** se sirve como API REST con FastAPI, empaquetada en una imagen OCI (`Containerfile`) que corre igual con Docker o con Podman.
+
+### Arquitectura
+
+```text
+cliente (curl / Swagger)
+   │  HTTP :8000  JSON
+   ▼
+┌──────────────── contenedor mibici-equipo42-api ────────────────┐
+│ Uvicorn → FastAPI (mibici_mlops.api.main:app)                  │
+│   ├─ schemas.py        valida entrada/salida (Pydantic)        │
+│   └─ model_service.py  carga el modelo del Registry            │
+└──────────────────────────────┬─────────────────────────────────┘
+                               │  MLFLOW_TRACKING_URI
+                               ▼
+        servidor MLflow en el host (:5000) → models:/mibici-equipo42-p1-demanda@champion
+```
+
+| Componente | Archivo | Responsable |
+|---|---|---|
+| Carga del modelo desde el Registry | `mibici_mlops/api/model_service.py`, `mibici_mlops/api/config.py` | Carlos Eduardo |
+| API y validación | `mibici_mlops/api/main.py`, `mibici_mlops/api/schemas.py` | Andrea |
+| Contenedor y dependencias | `Containerfile`, `requirements-api.txt`, `.dockerignore` | Víctor |
+| Documentación, prueba E2E y evidencias | `README.md`, `docs/evidencias/actividad8_api.png` | Carlos David |
+
+### Recuperación del modelo: opción elegida
+
+Elegimos **consultar el Registry en tiempo de ejecución**. El contenedor no incluye el modelo; al recibir la primera petición lo descarga del servidor MLflow indicado en `MLFLOW_TRACKING_URI`, usando el nombre y alias `mibici-equipo42-p1-demanda@champion`.
+
+- **Ventaja:** si se promueve otra versión a `champion`, basta con reiniciar el contenedor; no hay que reconstruir la imagen.
+- **Costo:** el servidor MLflow tiene que estar disponible. Si no responde, la API devuelve un error en `/predict` y `/health` sigue funcionando.
+
+`mlflow.db`, `mlruns/` y `mlartifacts/` están en `.dockerignore`, así que la imagen no lleva datos ni artefactos.
+
+### Estrategia de despliegue: inferencia en tiempo real
+
+Servimos P1 como **inferencia en línea (online)**: cada petición trae una sola fila, con una estación y una hora, y recibe la predicción al momento. Elegimos este esquema por tres razones:
+
+- La pregunta operativa es inmediata: cuántas salidas habrá en la próxima hora en esta estación, para decidir el rebalanceo.
+- La entrada es pequeña (11 variables numéricas) y el modelo (HistGradientBoosting) predice en milisegundos, así que no se necesita procesar por lotes para que el costo valga la pena.
+- La API es la base de la arquitectura de microservicios de la siguiente entrega.
+
+La **inferencia por lotes** queda como alternativa para generar cada noche el pronóstico de todas las estaciones y guardarlo en una tabla. Convendría cuando el consumidor sea un tablero y no un sistema que decide en el momento (Huyen, 2022, cap. 7).
+
+### 1. Levantar MLflow con el modelo registrado
+
+En una terminal aparte, desde la raíz del repo. Se usa `--host 0.0.0.0` para que el contenedor pueda llegar al servidor; el comando de la entrega 2 solo escucha en `127.0.0.1`.
+
+```bash
+python -m mlflow server --backend-store-uri sqlite:///mlflow.db --host 0.0.0.0 --port 5000
+```
+
+Si el Registry está vacío (clon limpio), hay que registrar el champion de P1:
+
+```bash
+# PENDIENTE: comando del script de registro (PR de Carlos Eduardo)
+```
+
+### 2. Construir la imagen
+
+```bash
+# Docker
+docker build -f Containerfile -t mibici-equipo42-api:dev .
+
+# Podman
+podman build -f Containerfile -t mibici-equipo42-api:dev .
+```
+
+### 3. Levantar el contenedor
+
+La dirección del host cambia según el motor:
+
+```bash
+# Docker
+docker run --rm --name mibici-api -p 8000:8000 \
+  -e MLFLOW_TRACKING_URI=http://host.docker.internal:5000 \
+  mibici-equipo42-api:dev
+
+# Podman
+podman run --rm --name mibici-api -p 8000:8000 \
+  -e MLFLOW_TRACKING_URI=http://host.containers.internal:5000 \
+  mibici-equipo42-api:dev
+```
+
+### 4. Consumir la API
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/health` | Estado del servicio |
+| `POST` | `/predict` | Predicción de salidas de P1 |
+| `GET` | `/docs` | Documentación interactiva (Swagger UI) |
+
+**Salud del servicio:**
+
+```bash
+curl http://localhost:8000/health
+```
+
+```json
+{"status": "ok"}
+```
+
+**Predicción.** El cuerpo lleva las 11 variables del modelo; no se aceptan campos adicionales:
+
+| Variable | Tipo | Rango válido |
+|---|---|---|
+| `hora_dia` | entero | 0–23 |
+| `dia_semana` | entero | 0 (lunes) – 6 (domingo) |
+| `es_fin_semana` | entero | 0 o 1 |
+| `mes` | entero | 1–12 |
+| `capacidad` | número | > 0 |
+| `salidas_lag_1`, `salidas_lag_2`, `salidas_lag_24`, `salidas_lag_168` | número | ≥ 0 |
+| `salidas_media_24h`, `salidas_media_4sem` | número | ≥ 0 |
+
+```bash
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+        "hora_dia": 8,
+        "dia_semana": 2,
+        "es_fin_semana": 0,
+        "mes": 8,
+        "capacidad": 20,
+        "salidas_lag_1": 2,
+        "salidas_lag_2": 3,
+        "salidas_lag_24": 2,
+        "salidas_lag_168": 4,
+        "salidas_media_24h": 2.5,
+        "salidas_media_4sem": 3.1
+      }'
+```
+
+```json
+PENDIENTE: respuesta real obtenida en la prueba E2E
+```
+
+**Entrada inválida.** Con `"hora_dia": 25`, la API responde `422 Unprocessable Entity` sin llegar a ejecutar el modelo:
+
+```text
+PENDIENTE: respuesta real de la prueba E2E
+```
+
+### Evidencia de ejecución
+
+**API respondiendo a una petición de prueba desde el contenedor:**
+
+<!-- PENDIENTE: captura de la prueba E2E -->
+![API en contenedor respondiendo a /predict](docs/evidencias/actividad8_api.png)
