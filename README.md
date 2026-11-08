@@ -580,7 +580,7 @@ cliente (curl / Swagger)
 Elegimos **consultar el Registry en tiempo de ejecución**. El contenedor no incluye el modelo; al recibir la primera petición lo descarga del servidor MLflow indicado en `MLFLOW_TRACKING_URI`, usando el nombre y alias `mibici-equipo42-p1-demanda@champion`.
 
 - **Ventaja:** si se promueve otra versión a `champion`, basta con reiniciar el contenedor; no hay que reconstruir la imagen.
-- **Costo:** el servidor MLflow tiene que estar disponible. Si no responde, la API devuelve un error en `/predict` y `/health` sigue funcionando.
+- **Costo:** el servidor MLflow tiene que estar disponible. Si no responde, `/predict` devuelve 503 y `/health` sigue funcionando. Una vez cargado, el modelo se reutiliza en las siguientes peticiones.
 
 `mlflow.db`, `mlruns/` y `mlartifacts/` están en `.dockerignore`, así que la imagen no lleva datos ni artefactos.
 
@@ -596,17 +596,42 @@ La **inferencia por lotes** queda como alternativa para generar cada noche el pr
 
 ### 1. Levantar MLflow con el modelo registrado
 
-En una terminal aparte, desde la raíz del repo. Se usa `--host 0.0.0.0` para que el contenedor pueda llegar al servidor; el comando de la entrega 2 solo escucha en `127.0.0.1`.
+En una terminal aparte, desde la raíz del repo:
 
 ```bash
-python -m mlflow server --backend-store-uri sqlite:///mlflow.db --host 0.0.0.0 --port 5000
+python -m mlflow server --backend-store-uri sqlite:///mlflow.db --host 0.0.0.0 --port 5000 \
+  --allowed-hosts "localhost:*,127.0.0.1:*,host.docker.internal:*,host.containers.internal:*"
 ```
 
-Si el Registry está vacío (clon limpio), hay que registrar el champion de P1:
+Este comando difiere del de la entrega 2 en dos puntos:
+
+- `--host 0.0.0.0` hace que el servidor escuche fuera de `127.0.0.1`, para que el contenedor pueda alcanzarlo.
+- `--allowed-hosts` es necesario porque MLflow 3.17 responde **403** a las peticiones cuyo `Host` no está en la lista. Desde el contenedor llegan como `host.docker.internal` (Docker) o `host.containers.internal` (Podman).
+
+Si el Registry está vacío (clon limpio), hay que entrenar el candidato final de P1 y registrarlo como `champion`. En la terminal de trabajo:
 
 ```bash
-# PENDIENTE: comando del script de registro (PR de Carlos Eduardo)
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+
+# 1. Entrenar el candidato final de P1 (run "p1-hgb-final")
+python -m mlflow run . -e train --experiment-name mibici-equipo42 -P question=p1 -P model=hgb-final
+
+# 2. Registrarlo en el Model Registry con alias champion, descripción y linaje
+python -m mibici_mlops.registry --question p1
 ```
+
+El script busca el último run `p1-hgb-final` terminado y lo registra como `mibici-equipo42-p1-demanda@champion`. Para usar un run específico, se pasa `--run-id <id>`.
+
+**Variables de entorno del servicio** (con sus valores por defecto en `config.py`):
+
+| Variable | Por defecto | Uso |
+|---|---|---|
+| `MLFLOW_TRACKING_URI` | `http://host.docker.internal:5000` (en el Containerfile) | Servidor de MLflow con el Registry |
+| `MODEL_NAME` | `mibici-equipo42-p1-demanda` | Modelo registrado |
+| `MODEL_ALIAS` | `champion` | Alias que se carga |
+| `MODEL_VERSION` | vacío | Si se define, tiene prioridad sobre el alias |
+
+Si el Registry o el modelo no están disponibles, `/predict` responde **503** y `/health` sigue respondiendo `ok`.
 
 ### 2. Construir la imagen
 
