@@ -548,3 +548,201 @@ Los hallazgos detectados por DeepChecks, como valores faltantes esperados, corre
 ![Comando único de la Actividad 7](docs/evidencias/actividad7_comando_unico.png)
 
 De esta forma, las pruebas y los chequeos de calidad y seguridad pueden reproducirse desde un único punto de entrada, manteniendo separados los entornos que requieren versiones de dependencias diferentes.
+## Servicio de inferencia con FastAPI y contenedor — Actividad 8
+
+El modelo **P1 (demanda de salidas por estación y hora)** se sirve como API REST con FastAPI, empaquetada en una imagen OCI (`Containerfile`) que corre igual con Docker o con Podman.
+
+### Arquitectura
+
+```text
+cliente (curl / Swagger)
+   │  HTTP :8000  JSON
+   ▼
+┌──────────────── contenedor mibici-equipo42-api ────────────────┐
+│ Uvicorn → FastAPI (mibici_mlops.api.main:app)                  │
+│   ├─ schemas.py        valida entrada/salida (Pydantic)        │
+│   └─ model_service.py  carga el modelo del Registry            │
+└──────────────────────────────┬─────────────────────────────────┘
+                               │  MLFLOW_TRACKING_URI
+                               ▼
+        servidor MLflow en el host (:5000) → models:/mibici-equipo42-p1-demanda@champion
+```
+
+| Componente | Archivo | Responsable |
+|---|---|---|
+| Carga del modelo desde el Registry | `mibici_mlops/api/model_service.py`, `mibici_mlops/api/config.py` | Carlos Eduardo |
+| API y validación | `mibici_mlops/api/main.py`, `mibici_mlops/api/schemas.py` | Andrea |
+| Contenedor y dependencias | `Containerfile`, `requirements-api.txt`, `.dockerignore` | Víctor |
+| Documentación, prueba E2E y evidencias | `README.md`, `docs/evidencias/actividad8_*.png` | Carlos David |
+
+### Recuperación del modelo: opción elegida
+
+Elegimos **consultar el Registry en tiempo de ejecución**. El contenedor no incluye el modelo; al recibir la primera petición lo descarga del servidor MLflow indicado en `MLFLOW_TRACKING_URI`, usando el nombre y alias `mibici-equipo42-p1-demanda@champion`.
+
+- **Ventaja:** si se promueve otra versión a `champion`, basta con reiniciar el contenedor; no hay que reconstruir la imagen.
+- **Costo:** el servidor MLflow tiene que estar disponible. Si no responde, `/predict` devuelve 503 y `/health` sigue funcionando. Una vez cargado, el modelo se reutiliza en las siguientes peticiones.
+
+`mlflow.db`, `mlruns/` y `mlartifacts/` están en `.dockerignore`, así que la imagen no lleva datos ni artefactos.
+
+### Estrategia de despliegue: inferencia en tiempo real
+
+Servimos P1 como **inferencia en línea (online)**: cada petición trae una sola fila, con una estación y una hora, y recibe la predicción al momento. Elegimos este esquema por tres razones:
+
+- La pregunta operativa es inmediata: cuántas salidas habrá en la próxima hora en esta estación, para decidir el rebalanceo.
+- La entrada es pequeña (11 variables numéricas) y el modelo (HistGradientBoosting) predice en milisegundos, así que no se necesita procesar por lotes para que el costo valga la pena.
+- La API es la base de la arquitectura de microservicios de la siguiente entrega.
+
+La **inferencia por lotes** queda como alternativa para generar cada noche el pronóstico de todas las estaciones y guardarlo en una tabla. Convendría cuando el consumidor sea un tablero y no un sistema que decide en el momento (Huyen, 2022, cap. 7).
+
+### 1. Levantar MLflow con el modelo registrado
+
+En una terminal aparte, desde la raíz del repo:
+
+```bash
+python -m mlflow server --backend-store-uri sqlite:///mlflow.db --host 0.0.0.0 --port 5000 \
+  --allowed-hosts "localhost:*,127.0.0.1:*,host.docker.internal:*,host.containers.internal:*"
+```
+
+Este comando difiere del de la entrega 2 en dos puntos:
+
+- `--host 0.0.0.0` hace que el servidor escuche fuera de `127.0.0.1`, para que el contenedor pueda alcanzarlo.
+- `--allowed-hosts` es necesario porque MLflow 3.17 responde **403** a las peticiones cuyo `Host` no está en la lista. Desde el contenedor llegan como `host.docker.internal` (Docker) o `host.containers.internal` (Podman).
+
+> **macOS: puerto 5000 ocupado.** En macOS 12 o posterior, el *Receptor AirPlay* (proceso `ControlCenter`) escucha en el puerto 5000. Se puede comprobar con `lsof -iTCP:5000 -sTCP:LISTEN`. Para no cambiar la configuración del sistema, se usa otro puerto en los tres lugares: el servidor (`--port 5001`), la terminal de trabajo (`MLFLOW_TRACKING_URI=http://127.0.0.1:5001`) y el contenedor (`-e MLFLOW_TRACKING_URI=http://host.docker.internal:5001`). La otra opción es desactivar el Receptor AirPlay en *Ajustes del Sistema → General → AirDrop y Handoff*.
+
+Si el Registry está vacío (clon limpio), hay que entrenar el candidato final de P1 y registrarlo como `champion`. En la terminal de trabajo:
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+
+# 1. Entrenar el candidato final de P1 (run "p1-hgb-final")
+python -m mlflow run . -e train --experiment-name mibici-equipo42 -P question=p1 -P model=hgb-final
+
+# 2. Registrarlo en el Model Registry con alias champion, descripción y linaje
+python -m mibici_mlops.registry --question p1
+```
+
+El script busca el último run `p1-hgb-final` terminado y lo registra como `mibici-equipo42-p1-demanda@champion`. Para usar un run específico, se pasa `--run-id <id>`.
+
+**Variables de entorno del servicio** (con sus valores por defecto en `config.py`):
+
+| Variable | Por defecto | Uso |
+|---|---|---|
+| `MLFLOW_TRACKING_URI` | `http://host.docker.internal:5000` (en el Containerfile) | Servidor de MLflow con el Registry |
+| `MODEL_NAME` | `mibici-equipo42-p1-demanda` | Modelo registrado |
+| `MODEL_ALIAS` | `champion` | Alias que se carga |
+| `MODEL_VERSION` | vacío | Si se define, tiene prioridad sobre el alias |
+
+Si el Registry o el modelo no están disponibles, `/predict` responde **503** y `/health` sigue respondiendo `ok`.
+
+### 2. Construir la imagen
+
+```bash
+# Docker
+docker build -f Containerfile -t mibici-equipo42-api:dev .
+
+# Podman
+podman build -f Containerfile -t mibici-equipo42-api:dev .
+```
+
+### 3. Levantar el contenedor
+
+La dirección del host cambia según el motor:
+
+```bash
+# Docker
+docker run --rm --name mibici-api -p 8000:8000 \
+  -e MLFLOW_TRACKING_URI=http://host.docker.internal:5000 \
+  mibici-equipo42-api:dev
+
+# Podman
+podman run --rm --name mibici-api -p 8000:8000 \
+  -e MLFLOW_TRACKING_URI=http://host.containers.internal:5000 \
+  mibici-equipo42-api:dev
+```
+
+### 4. Consumir la API
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/health` | Estado del servicio |
+| `POST` | `/predict` | Predicción de salidas de P1 |
+| `GET` | `/docs` | Documentación interactiva (Swagger UI) |
+
+**Salud del servicio:**
+
+```bash
+curl http://localhost:8000/health
+```
+
+```json
+{"status": "ok"}
+```
+
+**Predicción.** El cuerpo lleva las 11 variables del modelo; no se aceptan campos adicionales:
+
+| Variable | Tipo | Rango válido |
+|---|---|---|
+| `hora_dia` | entero | 0–23 |
+| `dia_semana` | entero | 0 (lunes) – 6 (domingo) |
+| `es_fin_semana` | entero | 0 o 1 |
+| `mes` | entero | 1–12 |
+| `capacidad` | número | > 0 |
+| `salidas_lag_1`, `salidas_lag_2`, `salidas_lag_24`, `salidas_lag_168` | número | ≥ 0 |
+| `salidas_media_24h`, `salidas_media_4sem` | número | ≥ 0 |
+
+```bash
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+        "hora_dia": 8,
+        "dia_semana": 2,
+        "es_fin_semana": 0,
+        "mes": 8,
+        "capacidad": 20,
+        "salidas_lag_1": 2,
+        "salidas_lag_2": 3,
+        "salidas_lag_24": 2,
+        "salidas_lag_168": 4,
+        "salidas_media_24h": 2.5,
+        "salidas_media_4sem": 3.1
+      }'
+```
+
+Respuesta (`200 OK`), obtenida en la prueba E2E con el champion v1 de P1:
+
+```json
+{"prediction": 3.0258984295877736}
+```
+
+Es decir, se esperan unas **3 salidas** en esa estación y hora.
+
+**Entrada inválida.** Con `"hora_dia": 25`, la API responde `422 Unprocessable Entity` sin ejecutar el modelo:
+
+```json
+{"detail":[{"type":"less_than_equal","loc":["body","hora_dia"],"msg":"Input should be less than or equal to 23","input":25,"ctx":{"le":23}}]}
+```
+
+Un campo que no forma parte del modelo (por ejemplo `"campo_inventado": 999`) también se rechaza con 422.
+
+### Problemas conocidos
+
+| Síntoma | Causa | Solución |
+|---|---|---|
+| `/predict` → 503 y en el log del contenedor `No such artifact: ''` | El experimento se creó escribiendo directo en `sqlite:///mlflow.db`, sin servidor. Su `artifact_location` es una ruta local del host, que no existe dentro del contenedor. | Crear el experimento a través del servidor, para que quede como `mlflow-artifacts:/N`. Se verifica con `sqlite3 mlflow.db "select name, artifact_location from experiments;"`. En un clon limpio ya queda así. |
+| `/predict` → 503 y el servidor de MLflow registra `403` | El `Host` del contenedor no está en `--allowed-hosts`. | Levantar el servidor con el `--allowed-hosts` de la sección 1. |
+| El servidor no arranca en el 5000 (macOS) | El Receptor AirPlay ocupa el puerto. | Usar `--port 5001` (ver la nota de la sección 1). |
+
+### Evidencia de ejecución
+
+Prueba realizada con Docker 29.8 (macOS arm64), MLflow en el puerto 5001 y el champion v1 de P1. El mismo `Containerfile` también se construyó sin errores con Podman 6.1.4 (rootless).
+
+**Peticiones de prueba y respuestas JSON** (`/health`, `/predict` y entrada inválida con 422):
+
+![Respuestas de /health, /predict y 422](docs/evidencias/actividad8_curl.png)
+
+**Log del contenedor:** carga del champion desde el Model Registry y códigos 200 / 422:
+
+![Log del contenedor cargando el modelo y respondiendo](docs/evidencias/actividad8_api.png)
+
+El `WARNING` de MLflow sobre `psutil`, `pytest` y `rich` es esperado: son dependencias del entorno de desarrollo donde se entrenó el modelo, no se necesitan para predecir y no se instalan en la imagen.
