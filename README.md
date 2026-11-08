@@ -573,7 +573,7 @@ cliente (curl / Swagger)
 | Carga del modelo desde el Registry | `mibici_mlops/api/model_service.py`, `mibici_mlops/api/config.py` | Carlos Eduardo |
 | API y validación | `mibici_mlops/api/main.py`, `mibici_mlops/api/schemas.py` | Andrea |
 | Contenedor y dependencias | `Containerfile`, `requirements-api.txt`, `.dockerignore` | Víctor |
-| Documentación, prueba E2E y evidencias | `README.md`, `docs/evidencias/actividad8_api.png` | Carlos David |
+| Documentación, prueba E2E y evidencias | `README.md`, `docs/evidencias/actividad8_*.png` | Carlos David |
 
 ### Recuperación del modelo: opción elegida
 
@@ -735,8 +735,14 @@ Un campo que no forma parte del modelo (por ejemplo `"campo_inventado": 999`) ta
 
 ### Evidencia de ejecución
 
-**API respondiendo a una petición de prueba desde el contenedor:**
-
 Prueba realizada con Docker 29.8 (macOS arm64), MLflow en el puerto 5001 y el champion v1 de P1. El mismo `Containerfile` también se construyó sin errores con Podman 6.1.4 (rootless).
 
-![API en contenedor respondiendo a /predict](docs/evidencias/actividad8_api.png)
+**Peticiones de prueba y respuestas JSON** (`/health`, `/predict` y entrada inválida con 422):
+
+![Respuestas de /health, /predict y 422](docs/evidencias/actividad8_curl.png)
+
+**Log del contenedor:** carga del champion desde el Model Registry y códigos 200 / 422:
+
+![Log del contenedor cargando el modelo y respondiendo](docs/evidencias/actividad8_api.png)
+
+El `WARNING` de MLflow sobre `psutil`, `pytest` y `rich` es esperado: son dependencias del entorno de desarrollo donde se entrenó el modelo, no se necesitan para predecir y no se instalan en la imagen.
