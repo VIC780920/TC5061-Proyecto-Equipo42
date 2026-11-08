@@ -37,6 +37,17 @@ FECHA_FIN = "2026-09-30"
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
 MLFLOW_EXPERIMENT = "mibici-equipo42"
 
+# Modelo que sirve la API (entrega 4). Por defecto la versión con alias champion de P1;
+# MODEL_VERSION fija una versión exacta y tiene prioridad sobre el alias.
+MODELOS_REGISTRADOS = {
+    "p1": "mibici-equipo42-p1-demanda",
+    "p2": "mibici-equipo42-p2-riesgo",
+    "p3": "mibici-equipo42-p3-grupos",
+}
+API_MODEL_NAME = os.getenv("MODEL_NAME", MODELOS_REGISTRADOS["p1"])
+API_MODEL_ALIAS = os.getenv("MODEL_ALIAS", "champion")
+API_MODEL_VERSION = os.getenv("MODEL_VERSION") or None
+
 VIAJES_PATH = PROCESSED_DATA_DIR / "viajes"
 ESTACIONES_PATH = PROCESSED_DATA_DIR / "estaciones.parquet"
 MANIFIESTO_PATH = PROJ_ROOT / "data_manifest.json"
