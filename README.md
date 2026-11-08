@@ -709,19 +709,34 @@ curl -X POST http://localhost:8000/predict \
       }'
 ```
 
+Respuesta (`200 OK`), obtenida en la prueba E2E con el champion v1 de P1:
+
 ```json
-PENDIENTE: respuesta real obtenida en la prueba E2E
+{"prediction": 3.0258984295877736}
 ```
 
-**Entrada inválida.** Con `"hora_dia": 25`, la API responde `422 Unprocessable Entity` sin llegar a ejecutar el modelo:
+Es decir, se esperan unas **3 salidas** en esa estación y hora.
 
-```text
-PENDIENTE: respuesta real de la prueba E2E
+**Entrada inválida.** Con `"hora_dia": 25`, la API responde `422 Unprocessable Entity` sin ejecutar el modelo:
+
+```json
+{"detail":[{"type":"less_than_equal","loc":["body","hora_dia"],"msg":"Input should be less than or equal to 23","input":25,"ctx":{"le":23}}]}
 ```
+
+Un campo que no forma parte del modelo (por ejemplo `"campo_inventado": 999`) también se rechaza con 422.
+
+### Problemas conocidos
+
+| Síntoma | Causa | Solución |
+|---|---|---|
+| `/predict` → 503 y en el log del contenedor `No such artifact: ''` | El experimento se creó escribiendo directo en `sqlite:///mlflow.db`, sin servidor. Su `artifact_location` es una ruta local del host, que no existe dentro del contenedor. | Crear el experimento a través del servidor, para que quede como `mlflow-artifacts:/N`. Se verifica con `sqlite3 mlflow.db "select name, artifact_location from experiments;"`. En un clon limpio ya queda así. |
+| `/predict` → 503 y el servidor de MLflow registra `403` | El `Host` del contenedor no está en `--allowed-hosts`. | Levantar el servidor con el `--allowed-hosts` de la sección 1. |
+| El servidor no arranca en el 5000 (macOS) | El Receptor AirPlay ocupa el puerto. | Usar `--port 5001` (ver la nota de la sección 1). |
 
 ### Evidencia de ejecución
 
 **API respondiendo a una petición de prueba desde el contenedor:**
 
-<!-- PENDIENTE: captura de la prueba E2E -->
+Prueba realizada con Docker 29.8 (macOS arm64), MLflow en el puerto 5001 y el champion v1 de P1. El mismo `Containerfile` también se construyó sin errores con Podman 6.1.4 (rootless).
+
 ![API en contenedor respondiendo a /predict](docs/evidencias/actividad8_api.png)
