@@ -608,6 +608,8 @@ Este comando difiere del de la entrega 2 en dos puntos:
 - `--host 0.0.0.0` hace que el servidor escuche fuera de `127.0.0.1`, para que el contenedor pueda alcanzarlo.
 - `--allowed-hosts` es necesario porque MLflow 3.17 responde **403** a las peticiones cuyo `Host` no está en la lista. Desde el contenedor llegan como `host.docker.internal` (Docker) o `host.containers.internal` (Podman).
 
+> **macOS: puerto 5000 ocupado.** En macOS 12 o posterior, el *Receptor AirPlay* (proceso `ControlCenter`) escucha en el puerto 5000. Se puede comprobar con `lsof -iTCP:5000 -sTCP:LISTEN`. Para no cambiar la configuración del sistema, se usa otro puerto en los tres lugares: el servidor (`--port 5001`), la terminal de trabajo (`MLFLOW_TRACKING_URI=http://127.0.0.1:5001`) y el contenedor (`-e MLFLOW_TRACKING_URI=http://host.docker.internal:5001`). La otra opción es desactivar el Receptor AirPlay en *Ajustes del Sistema → General → AirDrop y Handoff*.
+
 Si el Registry está vacío (clon limpio), hay que entrenar el candidato final de P1 y registrarlo como `champion`. En la terminal de trabajo:
 
 ```bash
