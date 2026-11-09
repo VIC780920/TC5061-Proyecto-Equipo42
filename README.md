@@ -570,7 +570,7 @@ cliente (curl / Swagger)
 
 | Componente | Archivo | Responsable |
 |---|---|---|
-| Carga del modelo desde el Registry | `mibici_mlops/api/model_service.py`, `mibici_mlops/api/config.py` | Carlos Eduardo |
+| Carga del modelo desde el Registry | `mibici_mlops/api/model_service.py`, `mibici_mlops/registry.py`, variables en `mibici_mlops/config.py` | Carlos Eduardo |
 | API y validación | `mibici_mlops/api/main.py`, `mibici_mlops/api/schemas.py` | Andrea |
 | Contenedor y dependencias | `Containerfile`, `requirements-api.txt`, `.dockerignore` | Víctor |
 | Documentación, prueba E2E y evidencias | `README.md`, `docs/evidencias/actividad8_*.png` | Carlos David |
@@ -610,17 +610,23 @@ Este comando difiere del de la entrega 2 en dos puntos:
 
 > **macOS: puerto 5000 ocupado.** En macOS 12 o posterior, el *Receptor AirPlay* (proceso `ControlCenter`) escucha en el puerto 5000. Se puede comprobar con `lsof -iTCP:5000 -sTCP:LISTEN`. Para no cambiar la configuración del sistema, se usa otro puerto en los tres lugares: el servidor (`--port 5001`), la terminal de trabajo (`MLFLOW_TRACKING_URI=http://127.0.0.1:5001`) y el contenedor (`-e MLFLOW_TRACKING_URI=http://host.docker.internal:5001`). La otra opción es desactivar el Receptor AirPlay en *Ajustes del Sistema → General → AirDrop y Handoff*.
 
-Si el Registry está vacío (clon limpio), hay que entrenar el candidato final de P1 y registrarlo como `champion`. En la terminal de trabajo:
+Si el Registry está vacío (clon limpio), hay que descargar los datos, entrenar el candidato final de P1 y registrarlo como `champion`. `hgb-final` toma la mejor combinación de la última `p1-hgb-search`, así que la búsqueda va antes. En la terminal de trabajo:
 
 ```bash
 export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
 
-# 1. Entrenar el candidato final de P1 (run "p1-hgb-final")
+# 1. Ingesta de los datos (si no se ha corrido)
+python -m mlflow run . -e ingest --experiment-name mibici-equipo42
+
+# 2. Búsqueda de hiperparámetros y candidato final de P1 (run "p1-hgb-final")
+python -m mlflow run . -e train --experiment-name mibici-equipo42 -P question=p1 -P model=hgb-search
 python -m mlflow run . -e train --experiment-name mibici-equipo42 -P question=p1 -P model=hgb-final
 
-# 2. Registrarlo en el Model Registry con alias champion, descripción y linaje
+# 3. Registrarlo en el Model Registry con alias champion, descripción y linaje
 python -m mibici_mlops.registry --question p1
 ```
+
+En Windows (PowerShell) la variable se define con `$env:MLFLOW_TRACKING_URI="http://127.0.0.1:5000"` y a los `mlflow run` se les agrega `--env-manager local` (ver la sección 5 de la entrega 2).
 
 El script busca el último run `p1-hgb-final` terminado y lo registra como `mibici-equipo42-p1-demanda@champion`. Para usar un run específico, se pasa `--run-id <id>`.
 
