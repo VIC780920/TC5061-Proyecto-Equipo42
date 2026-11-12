@@ -2,67 +2,113 @@
 
 ## 1. Objetivo
 
-Evaluar cambios en las distribuciones y en la completitud de las variables predictoras del modelo P1, que estima las salidas de bicicletas por estación y hora.
+Evaluar cambios en las distribuciones y la completitud de las 11 variables predictoras del modelo champion P1 (`p1-hgb-final`), que estima las salidas de bicicletas por estación y hora.
 
-El análisis utiliza Evidently 0.7.23 y corresponde a una evaluación offline sobre datos históricos.
+El monitoreo utiliza Evidently 0.7.23 y corresponde a una evaluación offline sobre datos históricos. Sus resultados no constituyen, por sí solos, evidencia de degradación predictiva.
 
 ## 2. Periodos analizados
 
-- Referencia: enero a marzo de 2026.
-- Actual: julio a septiembre de 2026.
-- Tamaño de muestra: 50,000 registros por periodo.
-- Muestreo: aleatorio reproducible, con semilla 42.
-- Variables predictoras: 11.
+Se utilizan tres muestras de 50,000 registros y 11 variables, obtenidas mediante muestreo aleatorio reproducible con semilla 42.
 
-Las muestras se almacenan en `reports/evidently/`.
+| Conjunto | Periodo | Propósito |
+|---|---|---|
+| Referencia principal | Julio 2025–junio 2026 | Periodo de entrenamiento del champion P1 |
+| Referencia estacional | Julio–septiembre 2025 | Comparación de los mismos meses entre años |
+| Actual | Julio–septiembre 2026 | Periodo de monitoreo |
+
+Las muestras se almacenan localmente en `reports/evidently/`.
 
 ## 3. Metodología
 
-Se utiliza `DataDriftPreset` de Evidently para comparar las distribuciones de las variables predictoras.
+Se utiliza `DataDriftPreset` de Evidently para evaluar cambios en las distribuciones marginales de las variables predictoras y `DataSummaryPreset` para revisar calidad y completitud.
 
-La configuración aplicada utiliza un umbral individual de 0.1 y un umbral global de proporción de variables con drift de 0.5.
+El umbral individual de detección es 0.1 y el criterio global es una proporción de variables con drift de al menos 0.5.
 
-Evidently aplica distancia de Wasserstein normalizada a las variables numéricas y Jensen-Shannon a `es_fin_semana`.
+Se realizan tres análisis:
 
-También se utiliza `DataSummaryPreset` para analizar características generales y completitud de los datos.
+1. Principal: referencia anual contra periodo actual, con las 11 variables.
+2. Complementario: misma comparación excluyendo `mes`, únicamente con fines diagnósticos.
+3. Estacional: julio–septiembre de 2025 contra julio–septiembre de 2026, con las 11 variables.
 
-Se realiza un análisis complementario excluyendo `mes` del monitoreo, sin modificar las variables del modelo original.
+Evidently selecciona métodos estadísticos según los datos y tipos inferidos. En estos resultados se utilizan distancia de Wasserstein normalizada y distancia de Jensen-Shannon. Los scores calculados mediante métodos diferentes no deben compararse directamente en magnitud.
+
+La exclusión de `mes` del análisis complementario no modifica las características del modelo champion.
 
 ## 4. Resultados de Data Drift
 
-| Indicador | Análisis original | Sin mes |
-|---|---:|---:|
-| Variables evaluadas | 11 | 10 |
-| Variables con drift | 1 | 0 |
-| Porcentaje con drift | 9.09% | 0% |
-| Drift global detectado | No | No |
+| Indicador | Principal | Sin `mes` | Estacional |
+|---|---:|---:|---:|
+| Variables evaluadas | 11 | 10 | 11 |
+| Variables con drift | 1 | 0 | 1 |
+| Proporción con drift | 9.09% | 0% | 9.09% |
+| Drift global detectado | No | No | No |
 
-La única variable que supera el umbral individual es `mes`, con un score de 7.264529.
+### 4.1. Análisis principal
 
-Este resultado es consistente con la comparación de trimestres diferentes y debe interpretarse considerando la estacionalidad.
+La única variable con drift es `mes`, con score de 0.730140 (Wasserstein normalizada), superior al umbral de 0.1.
 
-Las demás variables no superaron sus respectivos umbrales de drift.
+Las otras diez variables no presentan drift bajo la configuración utilizada.
+
+Al excluir `mes` con fines diagnósticos, ninguna de las diez variables restantes presenta drift.
+
+### 4.2. Comparación estacional
+
+Al comparar julio–septiembre de 2025 contra julio–septiembre de 2026:
+
+- `mes` no presenta drift: score de 0.030480 (Jensen-Shannon).
+- `salidas_media_24h` presenta drift leve: score de 0.105946 (Wasserstein normalizada), ligeramente superior al umbral de 0.1.
+- Las otras nueve variables no superan sus umbrales.
+
+La desaparición del drift de `mes` al comparar los mismos meses respalda una explicación relacionada con las diferencias de calendario entre ventanas.
+
+El drift leve de `salidas_media_24h` sugiere un posible cambio en la distribución de la actividad histórica entre años y amerita seguimiento. No demuestra por sí solo deterioro del modelo.
+
+En ambos análisis se detecta drift en una de once variables, por debajo del criterio global de 50%.
 
 ## 5. Resultados de calidad de datos
 
-| Variable | Faltantes referencia | Faltantes actual |
+### 5.1. Completitud de las muestras principales
+
+| Variable | Referencia anual | Actual |
 |---|---:|---:|
-| capacidad | 0 (0%) | 188 (0.376%) |
-| salidas_media_4sem | 5 (0.01%) | 1,836 (3.672%) |
-| Total | 5 | 2,024 |
+| `capacidad` | 12 (0.024%) | 188 (0.376%) |
+| `salidas_media_4sem` | 3,216 (6.432%) | 1,836 (3.672%) |
+| Total de valores faltantes | 3,228 | 2,024 |
 
-El aumento de valores faltantes constituye un hallazgo de calidad de datos que requiere investigación.
+Las demás variables no presentan valores faltantes en las muestras analizadas.
 
-Se recomienda revisar las causas de ausencia de información, especialmente para `salidas_media_4sem`, antes de tomar decisiones sobre el tratamiento de los datos.
+Con la referencia anual, el porcentaje de faltantes de `salidas_media_4sem` es menor en el periodo actual, aunque `capacidad` presenta un incremento.
+
+### 5.2. Investigación de `salidas_media_4sem`
+
+Se revisó la tabla completa del periodo julio–septiembre de 2026, no solamente la muestra de 50,000 registros.
+
+Resultados:
+
+- 37,050 registros presentan `salidas_media_4sem` faltante.
+- Los faltantes corresponden a 85 estaciones distintas.
+- 29,018 registros (78.3%) corresponden a 58 estaciones cuya primera aparición observada en los datos ocurrió a partir de julio de 2026.
+- Los 37,050 faltantes (100%) se encuentran dentro de los primeros 28 días desde la primera aparición observada de cada estación.
+- No se encontraron faltantes posteriores a esos primeros 28 días.
+
+La implementación en `mibici_mlops/features.py` calcula la característica mediante cuatro desplazamientos históricos:
+
+`sum(g.shift(168 * k) for k in range(1, 5)) / 4`
+
+Por ello, el cálculo requiere cuatro observaciones históricas desplazadas, incluida la de 672 posiciones anteriores. Si falta alguna, el resultado puede ser nulo.
+
+Estos hallazgos respaldan que la falta de historial suficiente explica los valores faltantes iniciales. Los desplazamientos se expresan en observaciones; su equivalencia con semanas supone registros horarios continuos por estación. La primera aparición en el conjunto de datos no necesariamente coincide con la fecha oficial de apertura de la estación.
 
 ## 6. Limitaciones
 
-- Se comparan periodos estacionales diferentes.
-- El análisis se realiza sobre muestras, no sobre la totalidad de los registros.
-- Las pruebas evalúan distribuciones marginales y no garantizan estabilidad predictiva.
-- No se demuestra degradación del modelo ni se justifica automáticamente un reentrenamiento.
-- El análisis complementario sin `mes` es diagnóstico; no modifica el modelo.
-- Los resultados dependen de los métodos estadísticos, umbrales y tipos de variables configurados.
+- El monitoreo utiliza muestras aleatorias de 50,000 registros por conjunto.
+- Las pruebas detectan diferencias en distribuciones marginales, no degradación predictiva.
+- Los resultados dependen de los métodos estadísticos, tipos inferidos y umbrales utilizados.
+- Los scores de Wasserstein y Jensen-Shannon no son directamente comparables.
+- El análisis sin `mes` es diagnóstico y no cambia el modelo original.
+- La comparación estacional controla los meses observados, pero no elimina otras diferencias entre años.
+- La asociación de faltantes con el historial inicial no acredita fechas oficiales de apertura de estaciones.
+- El monitoreo no justifica automáticamente un reentrenamiento; debe complementarse con métricas predictivas y pruebas A/B.
 
 ## 7. Reproducción
 
@@ -70,23 +116,25 @@ El análisis se ejecuta offline desde la raíz del repositorio con Python 3.12.
 
 ### 7.1. Preparar las muestras
 
-Se requiere acceso a los datos fuente del proyecto MiBici y al entorno principal del proyecto.
+Se requiere acceso a los datos fuente de MiBici y al entorno principal del proyecto.
 
 Ejecutar:
 
     .venv/bin/python scripts/preparar_muestras_evidently.py
 
-El script utiliza la función `construir_tabla()` del modelo P1, reutiliza el caché cuando corresponde y genera dos muestras reproducibles de 50,000 registros y 11 variables, con semilla 42.
+El script utiliza `construir_tabla()` del modelo P1 y genera tres muestras reproducibles de 50,000 registros, con semilla 42:
 
-Los periodos son enero-marzo de 2026 (referencia) y julio-septiembre de 2026 (actual).
+- `referencia_p1.parquet`: julio 2025–junio 2026.
+- `referencia_estacional_p1.parquet`: julio–septiembre 2025.
+- `actual_p1.parquet`: julio–septiembre 2026.
 
 ### 7.2. Instalar Evidently
 
-Crear el entorno independiente con Python 3.12:
+Crear un entorno independiente con Python 3.12:
 
     python3.12 -m venv .venv-evidently
 
-Instalar las dependencias:
+Instalar dependencias:
 
     .venv-evidently/bin/python -m pip install -r requirements-evidently.txt
 
@@ -96,25 +144,25 @@ Ejecutar:
 
     .venv-evidently/bin/python scripts/evidently_drift_p1.py
 
-El script genera los reportes HTML y archivos CSV de Data Drift y completitud de datos en `reports/evidently/`.
+El script genera los reportes HTML y archivos CSV de drift y calidad de datos en `reports/evidently/`.
 
 ### 7.4. Control de versiones
 
-Se verificó que las muestras regeneradas son idénticas a las originales y que los resultados del monitoreo se reproducen.
-
-El directorio `reports/evidently/` está excluido mediante `.gitignore`. Los archivos Parquet, HTML y CSV se conservan localmente y no se incorporan al repositorio.
+El directorio `reports/evidently/` está excluido mediante `.gitignore`. Los archivos Parquet, HTML y CSV permanecen locales y pueden regenerarse mediante los scripts versionados.
 
 ## 8. Evidencias
 
 - `reports/evidently/reporte_drift_p1.html`
 - `reports/evidently/reporte_drift_p1_sin_mes.html`
+- `reports/evidently/reporte_drift_p1_estacional.html`
 - `reports/evidently/resultados_drift_p1.csv`
+- `reports/evidently/resultados_drift_p1_estacional.csv`
 - `reports/evidently/resultados_calidad_p1.csv`
 
 ## 9. Conclusión
 
-En las muestras analizadas no se detectó drift global bajo los umbrales establecidos. El único cambio individual identificado corresponde a `mes`, mientras que las demás variables no superaron sus umbrales.
+No se detectó drift global bajo los umbrales establecidos. El análisis principal identifica drift únicamente en `mes`, mientras que la comparación estacional elimina esa señal y detecta un drift leve en `salidas_media_24h`.
 
-Se identificó un incremento de valores faltantes en el periodo actual, principalmente en `salidas_media_4sem`.
+La investigación de calidad de datos muestra que todos los faltantes observados en `salidas_media_4sem` durante julio–septiembre de 2026 se concentran en los primeros 28 días de historial observado de las estaciones, lo cual es consistente con su fórmula de construcción.
 
-Se recomienda complementar estos resultados con la evaluación del desempeño predictivo y las pruebas offline A/B realizadas por el equipo antes de decidir sobre un eventual reentrenamiento.
+Se recomienda monitorear `salidas_media_24h` y complementar estos hallazgos con las métricas predictivas y las pruebas offline A/B del equipo antes de decidir sobre un eventual reentrenamiento.

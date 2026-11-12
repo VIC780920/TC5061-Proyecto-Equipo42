@@ -21,7 +21,7 @@ def main():
     fechas = tabla["hora"]
 
     referencia = tabla.loc[
-        (fechas >= "2026-01-01") & (fechas < "2026-04-01"),
+        (fechas >= "2025-07-01") & (fechas < "2026-07-01"),
         CARACTERISTICAS,
     ]
 
@@ -30,10 +30,23 @@ def main():
         CARACTERISTICAS,
     ]
 
-    if len(referencia) < SAMPLE_SIZE or len(actual) < SAMPLE_SIZE:
+    referencia_estacional = tabla.loc[
+        (fechas >= "2025-07-01") & (fechas < "2025-10-01"),
+        CARACTERISTICAS,
+    ]
+
+    if (
+        len(referencia) < SAMPLE_SIZE
+        or len(actual) < SAMPLE_SIZE
+        or len(referencia_estacional) < SAMPLE_SIZE
+    ):
         raise ValueError(
             "No existen suficientes registros para generar las muestras."
         )
+
+    referencia_estacional = referencia_estacional.sample(
+        n=SAMPLE_SIZE, random_state=RANDOM_STATE
+    )
 
     referencia = referencia.sample(
         n=SAMPLE_SIZE, random_state=RANDOM_STATE
@@ -44,10 +57,14 @@ def main():
 
     referencia.to_parquet(OUTPUT / "referencia_p1.parquet", index=False)
     actual.to_parquet(OUTPUT / "actual_p1.parquet", index=False)
+    referencia_estacional.to_parquet(
+        OUTPUT / "referencia_estacional_p1.parquet", index=False
+    )
 
     print("Muestras generadas correctamente:")
     print(f"Referencia: {referencia.shape}")
     print(f"Actual: {actual.shape}")
+    print(f"Referencia estacional: {referencia_estacional.shape}")
     print(f"Directorio: {OUTPUT}")
 
 

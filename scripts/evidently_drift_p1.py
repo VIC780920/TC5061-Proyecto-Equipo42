@@ -23,7 +23,7 @@ def load_samples():
     return reference, current
 
 
-def run_report(reference, current, exclude_month=False):
+def run_report(reference, current, exclude_month=False, filename=None):
     if exclude_month:
         reference = reference.drop(columns=["mes"])
         current = current.drop(columns=["mes"])
@@ -43,17 +43,18 @@ def run_report(reference, current, exclude_month=False):
         ),
     )
 
-    filename = (
-        "reporte_drift_p1_sin_mes.html"
-        if exclude_month
-        else "reporte_drift_p1.html"
-    )
+    if filename is None:
+        filename = (
+            "reporte_drift_p1_sin_mes.html"
+            if exclude_month
+            else "reporte_drift_p1.html"
+        )
     result.save_html(str(OUTPUT / filename))
 
     return result
 
 
-def export_drift_metrics(result):
+def export_drift_metrics(result, filename="resultados_drift_p1.csv"):
     rows = []
 
     for metric in result.dict()["metrics"]:
@@ -80,7 +81,7 @@ def export_drift_metrics(result):
         )
 
     df = pd.DataFrame(rows)
-    df.to_csv(OUTPUT / "resultados_drift_p1.csv", index=False)
+    df.to_csv(OUTPUT / filename, index=False)
     return df
 
 
@@ -142,6 +143,33 @@ def main():
 
     print("\nCalidad de datos:")
     print(quality.to_string(index=False))
+
+    seasonal_reference = pd.read_parquet(
+        OUTPUT / "referencia_estacional_p1.parquet"
+    )
+
+    if list(seasonal_reference.columns) != list(current.columns):
+        raise ValueError("La muestra estacional tiene columnas diferentes.")
+
+    seasonal_result = run_report(
+        seasonal_reference,
+        current,
+        filename="reporte_drift_p1_estacional.html",
+    )
+
+    seasonal_drift = export_drift_metrics(
+        seasonal_result,
+        filename="resultados_drift_p1_estacional.csv",
+    )
+
+    seasonal_summary = seasonal_result.dict()["metrics"][0]["value"]
+
+    print("\nResultados de Data Drift estacional (jul-sep 2025 vs 2026):")
+    print(seasonal_drift.to_string(index=False))
+    print(
+        f"\nDrift estacional: {seasonal_summary['count']} de "
+        f"{len(seasonal_reference.columns)} variables"
+    )
 
     print(f"\nReportes y CSV generados en: {OUTPUT}")
 
