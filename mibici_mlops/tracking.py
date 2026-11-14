@@ -115,7 +115,7 @@ def registrar_run(
     return run.info.run_id
 
 # --------------------------------------------------------------------------- entrega 2
-ETAPAS_TRABAJO = ("baseline", "search", "candidate")
+ETAPAS_TRABAJO = ("baseline", "search", "candidate", "ab_test")
 
 
 def _validar_params(params: dict) -> None:
@@ -140,7 +140,7 @@ def iniciar_run(
       de abrir otro, así cada ejecución del proyecto produce exactamente un run de primer nivel.
     - Con nested=True se abre un run hijo del run activo (una combinación de una búsqueda).
     - Etiquetas: equipo, pregunta y question (P1/P2/P3), git_commit, git_cambios_sin_commit,
-      model_family y stage_of_work (baseline, search o candidate).
+      model_family y stage_of_work (baseline, search, candidate o ab_test).
     - Parámetros: fechas de la partición, data_version y seed, más los propios del modelo.
     """
     if stage_of_work not in ETAPAS_TRABAJO:
