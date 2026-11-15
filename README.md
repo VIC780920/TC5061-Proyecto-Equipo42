@@ -752,3 +752,94 @@ Prueba realizada con Docker 29.8 (macOS arm64), MLflow en el puerto 5001 y el ch
 ![Log del contenedor cargando el modelo y respondiendo](docs/evidencias/actividad8_api.png)
 
 El `WARNING` de MLflow sobre `psutil`, `pytest` y `rich` es esperado: son dependencias del entorno de desarrollo donde se entrenó el modelo, no se necesitan para predecir y no se instalan en la imagen.
+
+## Monitoreo de drift y A/B testing — Actividad 9
+
+Capa de observabilidad del modelo **P1**: se detecta con Evidently si los datos recientes se alejan de los de entrenamiento y se decide con un A/B testing offline si una versión reentrenada debe reemplazar a la vigente en el Model Registry.
+
+| Pieza | Documento | Código |
+|---|---|---|
+| Data drift y calidad de datos (Evidently 0.7.23) | [docs/EVIDENTLY_DATA_DRIFT_P1.md](docs/EVIDENTLY_DATA_DRIFT_P1.md) | `scripts/preparar_muestras_evidently.py`, `scripts/evidently_drift_p1.py` |
+| A/B testing champion vs challenger | [docs/AB_TEST_P1.md](docs/AB_TEST_P1.md) | `mibici_mlops/monitoring/ab_test_p1.py` |
+
+### Conjuntos de datos
+
+| Conjunto | Periodo | Por qué |
+|---|---|---|
+| Referencia | jul-2025 a jun-2026 | Es el train + val con el que se entrenó el champion (`p1-hgb-final`). |
+| Actual | jul-2026 a sep-2026 | Periodo posterior que simula producción. |
+| Referencia estacional | jul-2025 a sep-2025 | Mismos meses del año anterior: separa la estacionalidad del drift real. |
+| Evaluación A/B | sep-2026 | Ninguna de las dos versiones lo vio al entrenar (sin fuga de datos). |
+
+Las muestras de monitoreo son de 50,000 filas por conjunto (semilla 42) y salen de `construir_tabla()`, la misma función del entrenamiento.
+
+### Reproducción
+
+**Drift.** Desde la raíz del repo:
+
+```bash
+# 1. Muestras, con el entorno principal del proyecto
+python scripts/preparar_muestras_evidently.py
+
+# 2. Entorno aparte para Evidently (usa pandas 2.2.3, distinto del proyecto)
+conda create -n mibici-evidently python=3.12
+conda activate mibici-evidently
+pip install -r requirements-evidently.txt
+#   alternativa con venv: python3.12 -m venv .venv-evidently
+#   (en macOS con la carpeta sincronizada en iCloud, conda evita problemas con .venv)
+
+# 3. Reportes HTML y CSV en reports/evidently/ (ignorado por git; se regenera)
+python scripts/evidently_drift_p1.py
+```
+
+**A/B testing.** Requiere el servidor de MLflow con el champion registrado (sección 1 de la Actividad 8); los pasos completos están en [docs/AB_TEST_P1.md](docs/AB_TEST_P1.md). El script reentrena el challenger, lo registra como nueva versión de `mibici-equipo42-p1-demanda`, compara ambas versiones en sep-2026 y registra el run `p1-ab-test`.
+
+### Resultados
+
+**Drift.** No hay drift global (1 de 11 variables, 9.1 %, contra el criterio de 50 %).
+
+| Variable | Principal | Estacional | Lectura |
+|---|---:|---:|---|
+| `mes` | **0.730** | 0.030 | Efecto de calendario: la referencia tiene 12 meses y la actual 3. Desaparece al comparar la misma temporada. |
+| `salidas_media_24h` | 0.070 | **0.106** | Drift leve en la demanda reciente; hay que vigilarla. |
+| `capacidad` | 0.082 | 0.093 | Cerca del umbral, con faltantes 12 → 188: expansión de la red (58 estaciones nuevas desde jul-2026). |
+| Resto (8 variables) | ≤ 0.059 | ≤ 0.074 | Estables. |
+
+Umbral por variable: 0.1 (Wasserstein normalizada o Jensen-Shannon, según el tipo). Los faltantes de `salidas_media_4sem` son estructurales: los 37,050 casos de jul–sep 2026 están en los primeros 28 días de historial de cada estación.
+
+**A/B testing** (sep-2026, comparación pareada, IC 95 % por bootstrap de días):
+
+| Métrica | Champion v1 | Challenger v2 | Δ (v2 − v1) | IC 95 % |
+|---|---:|---:|---:|---|
+| MAE | 0.8371 | 0.8356 | −0.0016 | [−0.0022, −0.0008] |
+| RMSE | 1.5267 | 1.5212 | −0.0055 | [−0.0104, −0.0009] |
+
+El challenger cumple la regla definida antes de correr (IC del Δ MAE completo por debajo de 0 y el RMSE no empeora), así que se promovió: el alias `champion` apunta a la **versión 2** y la versión 1 queda como `champion_anterior`. La API de la Actividad 8 carga por alias y no requiere cambios.
+
+**Recomendación de Continuous Training:** reentrenamiento **condicionado por evidencia**. El drift (persistente en `salidas_media_24h` o `capacidad`) o una caída del MAE disparan una candidata, y este mismo A/B decide si se promueve. No se recomienda reentrenar por calendario: la mejora fue pequeña (−0.19 % de MAE), consistente con el drift leve.
+
+### Evidencia de ejecución
+
+**Resumen de drift: referencia vs actual**
+
+![Resumen de drift principal](docs/evidencias/actividad9_drift_principal_resumen.png)
+
+**Resumen de drift estacional: jul–sep 2025 vs jul–sep 2026**
+
+![Resumen de drift estacional](docs/evidencias/actividad9_drift_estacional_resumen.png)
+
+**`mes` (principal) y `salidas_media_24h` (estacional)**
+
+![Distribución de mes](docs/evidencias/actividad9_principal_mes.png)
+
+![Distribución de salidas_media_24h](docs/evidencias/actividad9_estacional_salidas_media_24h.png)
+
+**Calidad de datos**
+
+![Resumen de calidad de datos](docs/evidencias/actividad9_calidad_principal.png)
+
+**A/B testing: MAE por hora y por segmento**
+
+![MAE por hora y por segmento](reports/ab_test/ab_test_p1.png)
+
+Las tablas completas están en `docs/evidencias/actividad9_resultados_*.csv` (drift y calidad) y en `reports/ab_test/*.csv` (A/B). Otras capturas: `actividad9_principal_capacidad.png` y `actividad9_estacional_capacidad.png`.
