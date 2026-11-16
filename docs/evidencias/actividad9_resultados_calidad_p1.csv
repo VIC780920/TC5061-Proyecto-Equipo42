@@ -1,0 +1,12 @@
+variable,faltantes_referencia,faltantes_actual,porcentaje_referencia,porcentaje_actual
+hora_dia,0,0,0.0,0.0
+dia_semana,0,0,0.0,0.0
+es_fin_semana,0,0,0.0,0.0
+mes,0,0,0.0,0.0
+capacidad,12,188,0.024,0.376
+salidas_lag_1,0,0,0.0,0.0
+salidas_lag_2,0,0,0.0,0.0
+salidas_lag_24,0,0,0.0,0.0
+salidas_lag_168,0,0,0.0,0.0
+salidas_media_24h,0,0,0.0,0.0
+salidas_media_4sem,3216,1836,6.432,3.672
