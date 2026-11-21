@@ -26,8 +26,21 @@ services:
     volumes:
       - mlflow_db:/mlflow/db
       - mlflow_artifacts:/mlflow/artifacts
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=5)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    
     networks:
       - mibici-network
+    
   api:
     build:
       context: .
@@ -45,7 +58,19 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
-      - mlflow
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
     networks:
       - mibici-network
 
